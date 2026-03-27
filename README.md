@@ -29,6 +29,7 @@ npm install @rhost/testkit
 - [API reference — RhostContainer](#api-reference--rhostcontainer)
 - [Offline validator](#offline-validator)
 - [Watch mode](#watch-mode)
+- [CI/CD templates](#cicd-templates)
 - [MUSH output format](#mush-output-format)
 - [Using with LLM skills](#using-with-llm-skills)
 - [Environment variables](#environment-variables)
@@ -44,9 +45,10 @@ npm install @rhost/testkit
 - **Assert** results with a Jest-like `expect()` API and MUSH-aware matchers
 - **Snapshot test** softcode output — first run writes, subsequent runs compare with a diff on mismatch
 - **Preview** raw server output exactly as a MUSH client sees it — ANSI colours and all
-- **Manage fixtures** — create objects, set attributes, and auto-destroy everything after each test
+- **Manage fixtures** — create/destroy objects, set attributes, force commands, send mail, and more
 - **Validate softcode offline** — catch syntax errors and wrong arg counts without a server
 - **Watch mode** — re-run tests on save with a 300ms debounce
+- **Generate CI/CD workflows** — one command to get GitHub Actions or GitLab CI configured
 - **Spin up RhostMUSH in Docker** for isolated, reproducible CI runs
 - **Report** results with a pretty, indented pass/fail tree
 
@@ -449,6 +451,51 @@ await world.trigger(dbref: string, attr: string, args?: string): Promise<string[
 Triggers `@trigger dbref/attr=args`. Returns all output lines captured before the sentinel.
 
 ```typescript
+await world.pemit(target: string, msg: string): Promise<void>
+```
+Emits a message to a target: `@pemit target=msg`.
+
+```typescript
+await world.remit(room: string, msg: string): Promise<void>
+```
+Emits a message to all objects in a room: `@remit room=msg`.
+
+```typescript
+await world.force(actor: string, cmd: string): Promise<void>
+```
+Forces an object to run a command: `@force actor=cmd`.
+
+```typescript
+await world.parent(child: string, parent: string): Promise<void>
+```
+Sets a parent object: `@parent child=parent`.
+
+```typescript
+await world.zone(name: string): Promise<string>
+```
+Creates a zone room via `@dig name` and sets `INHERIT_ZONE`. Returns the room dbref. Registers for cleanup.
+
+```typescript
+await world.addToChannel(dbref: string, chan: string): Promise<void>
+```
+Adds an object to a channel: `@channel/add chan=dbref`.
+
+```typescript
+await world.grantQuota(dbref: string, n: number): Promise<void>
+```
+Sets the build quota for an object: `@quota/set dbref=n`.
+
+```typescript
+await world.wait(ms: number): Promise<void>
+```
+Pauses the test for `ms` milliseconds. Plain JavaScript delay — not a MUSH `@wait`.
+
+```typescript
+await world.mail(to: string, subj: string, body: string): Promise<void>
+```
+Sends in-game mail: `@mail to=subj/body`.
+
+```typescript
 await world.destroy(dbref: string): Promise<void>
 ```
 Destroys a single object with `@nuke`. Also removes it from the cleanup list.
@@ -720,6 +767,28 @@ npx rhost-testkit watch --no-clear       # don't clear terminal between runs
 ```
 
 TypeScript files are run with `ts-node --transpile-only`. Plain JS files are run with Node directly. Watch mode exits cleanly on Ctrl+C.
+
+---
+
+## CI/CD templates
+
+Generate a ready-to-use workflow file for your CI platform with one command:
+
+```bash
+# GitHub Actions → .github/workflows/mush-tests.yml
+npx rhost-testkit init --ci github
+
+# GitLab CI → .gitlab-ci.yml
+npx rhost-testkit init --ci gitlab
+
+# Overwrite an existing file
+npx rhost-testkit init --ci github --force
+```
+
+The generated file includes:
+- Node.js 20 setup
+- `npm ci` + `npm test`
+- A commented-out block for optional integration tests against a `rhostmush/rhostmush` Docker container — uncomment and set `RHOST_PASS` in your secrets to enable
 
 ---
 

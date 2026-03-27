@@ -35,7 +35,7 @@ are implemented in v0.2.0. Everything below is planned.
 
 ---
 
-### Extended World API
+### ✅ Extended World API (v1.0.0)
 
 Close the remaining gaps in `RhostWorld`:
 
@@ -70,7 +70,7 @@ runner.bench('Heavy iter', async ({ client }) => {
 
 ---
 
-### CI/CD Templates
+### ✅ CI/CD Templates (v1.0.0)
 
 ```
 npx rhost-testkit init --ci github

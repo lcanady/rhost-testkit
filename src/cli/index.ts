@@ -5,6 +5,7 @@
 
 import { runValidateCli } from './validate';
 import { runWatchCli } from './watch';
+import { runInitCli } from './init';
 
 const args = process.argv.slice(2);
 const cmd = args[0];
@@ -16,6 +17,10 @@ switch (cmd) {
 
   case 'watch':
     runWatchCli(args.slice(1));
+    break;
+
+  case 'init':
+    runInitCli(args.slice(1));
     break;
 
   case '--version':
@@ -50,6 +55,7 @@ USAGE
 COMMANDS
   validate    Validate a softcode expression offline (no server needed)
   watch       Watch test files and re-run on change
+  init        Generate CI/CD workflow templates
 
 OPTIONS
   -v, --version   Print version and exit
@@ -62,5 +68,7 @@ EXAMPLES
   rhost-testkit validate --file mycode.mush
   rhost-testkit watch
   rhost-testkit watch src/__tests__/math.test.ts
+  rhost-testkit init --ci github
+  rhost-testkit init --ci gitlab
 `.trim());
 }

@@ -106,6 +106,98 @@ export class RhostWorld {
     }
 
     /**
+     * Emits a message to a target object: `@pemit target=msg`.
+     */
+    async pemit(target: string, msg: string): Promise<void> {
+        this.guardInput('target', target);
+        this.guardInput('msg', msg);
+        await this.client.command(`@pemit ${target}=${msg}`);
+    }
+
+    /**
+     * Emits a message to all objects in a room: `@remit room=msg`.
+     */
+    async remit(room: string, msg: string): Promise<void> {
+        this.guardInput('room', room);
+        this.guardInput('msg', msg);
+        await this.client.command(`@remit ${room}=${msg}`);
+    }
+
+    /**
+     * Forces an object to execute a command: `@force actor=cmd`.
+     */
+    async force(actor: string, cmd: string): Promise<void> {
+        this.guardInput('actor', actor);
+        this.guardInput('cmd', cmd);
+        await this.client.command(`@force ${actor}=${cmd}`);
+    }
+
+    /**
+     * Sets a parent on an object: `@parent child=parent`.
+     */
+    async parent(child: string, parentDbref: string): Promise<void> {
+        this.guardInput('child', child);
+        this.guardInput('parent', parentDbref);
+        await this.client.command(`@parent ${child}=${parentDbref}`);
+    }
+
+    /**
+     * Creates a zone room via `@dig name` and sets the INHERIT_ZONE flag.
+     * Registers the dbref for automatic cleanup.
+     * Returns the dbref string like '#42'.
+     */
+    async zone(name: string): Promise<string> {
+        this.guardInput('name', name);
+        const lines = await this.client.command(`@dig ${name}`);
+        let dbref: string | null = null;
+        for (const line of lines) {
+            const m = line.match(/(?:room number\s+#?|#)(\d+)/i);
+            if (m) { dbref = `#${m[1]}`; break; }
+        }
+        if (!dbref) {
+            throw new Error(`world.zone(${JSON.stringify(name)}) could not parse dbref from output: ${JSON.stringify(lines)}`);
+        }
+        await this.client.command(`@set ${dbref}=INHERIT_ZONE`);
+        this.dbrefs.push(dbref);
+        return dbref;
+    }
+
+    /**
+     * Adds an object to a channel: `@channel/add chan=dbref`.
+     */
+    async addToChannel(dbref: string, chan: string): Promise<void> {
+        this.guardInput('dbref', dbref);
+        this.guardInput('chan', chan);
+        await this.client.command(`@channel/add ${chan}=${dbref}`);
+    }
+
+    /**
+     * Sets a quota on an object: `@quota/set dbref=n`.
+     */
+    async grantQuota(dbref: string, n: number): Promise<void> {
+        this.guardInput('dbref', dbref);
+        await this.client.command(`@quota/set ${dbref}=${n}`);
+    }
+
+    /**
+     * Pauses execution for `ms` milliseconds.
+     * This is a plain JavaScript delay — not a MUSH @wait command.
+     */
+    wait(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    /**
+     * Sends mail: `@mail to=subj/body`.
+     */
+    async mail(to: string, subj: string, body: string): Promise<void> {
+        this.guardInput('to', to);
+        this.guardInput('subj', subj);
+        this.guardInput('body', body);
+        await this.client.command(`@mail ${to}=${subj}/${body}`);
+    }
+
+    /**
      * Triggers `@trigger dbref/ATTR=args`. Returns captured output lines.
      */
     async trigger(dbref: string, attr: string, args?: string): Promise<string[]> {

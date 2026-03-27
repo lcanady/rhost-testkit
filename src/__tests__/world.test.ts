@@ -240,6 +240,238 @@ describe('RhostWorld.cleanup()', () => {
 });
 
 // ---------------------------------------------------------------------------
+// pemit()
+// ---------------------------------------------------------------------------
+
+describe('RhostWorld.pemit()', () => {
+    it('sends @pemit target=msg', async () => {
+        const client = mockClient({ commandResults: [[]] });
+        const world = new RhostWorld(client);
+        await world.pemit('#42', 'Hello there');
+        expect(client.command).toHaveBeenCalledWith('@pemit #42=Hello there');
+    });
+
+    it('throws on \\n in target', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.pemit('#42\n@pemit me=INJECTED', 'msg')).rejects.toThrow(/invalid/i);
+    });
+
+    it('throws on \\n in msg', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.pemit('#42', 'msg\n@pemit me=INJECTED')).rejects.toThrow(/invalid/i);
+    });
+
+    it('does not register a dbref', async () => {
+        const world = new RhostWorld(mockClient({ commandResults: [[]] }));
+        await world.pemit('#1', 'hi');
+        expect(world.size).toBe(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// remit()
+// ---------------------------------------------------------------------------
+
+describe('RhostWorld.remit()', () => {
+    it('sends @remit room=msg', async () => {
+        const client = mockClient({ commandResults: [[]] });
+        const world = new RhostWorld(client);
+        await world.remit('#10', 'Room message');
+        expect(client.command).toHaveBeenCalledWith('@remit #10=Room message');
+    });
+
+    it('throws on \\n in room', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.remit('#10\n@quit', 'msg')).rejects.toThrow(/invalid/i);
+    });
+
+    it('throws on \\n in msg', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.remit('#10', 'msg\n@quit')).rejects.toThrow(/invalid/i);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// force()
+// ---------------------------------------------------------------------------
+
+describe('RhostWorld.force()', () => {
+    it('sends @force actor=cmd', async () => {
+        const client = mockClient({ commandResults: [[]] });
+        const world = new RhostWorld(client);
+        await world.force('#42', 'say Hello');
+        expect(client.command).toHaveBeenCalledWith('@force #42=say Hello');
+    });
+
+    it('throws on \\n in actor', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.force('#42\n@pemit me=X', 'say hi')).rejects.toThrow(/invalid/i);
+    });
+
+    it('throws on \\n in cmd', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.force('#42', 'say hi\n@nuke me')).rejects.toThrow(/invalid/i);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// parent()
+// ---------------------------------------------------------------------------
+
+describe('RhostWorld.parent()', () => {
+    it('sends @parent child=parent', async () => {
+        const client = mockClient({ commandResults: [[]] });
+        const world = new RhostWorld(client);
+        await world.parent('#42', '#1');
+        expect(client.command).toHaveBeenCalledWith('@parent #42=#1');
+    });
+
+    it('throws on \\n in child', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.parent('#42\n@quit', '#1')).rejects.toThrow(/invalid/i);
+    });
+
+    it('throws on \\n in parent', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.parent('#42', '#1\n@quit')).rejects.toThrow(/invalid/i);
+    });
+
+    it('does not register a dbref', async () => {
+        const world = new RhostWorld(mockClient({ commandResults: [[]] }));
+        await world.parent('#42', '#1');
+        expect(world.size).toBe(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// zone()
+// ---------------------------------------------------------------------------
+
+describe('RhostWorld.zone()', () => {
+    it('digs a room then sets INHERIT_ZONE, returns dbref', async () => {
+        const client = mockClient({
+            commandResults: [
+                ['ZoneRoom created as room #77.'],
+                [],  // @set response
+            ],
+        });
+        const world = new RhostWorld(client);
+        const dbref = await world.zone('ZoneRoom');
+        expect(dbref).toBe('#77');
+        expect(client.command).toHaveBeenNthCalledWith(1, '@dig ZoneRoom');
+        expect(client.command).toHaveBeenNthCalledWith(2, '@set #77=INHERIT_ZONE');
+    });
+
+    it('registers the zone room for cleanup', async () => {
+        const client = mockClient({
+            commandResults: [['Zone #88 created.'], []],
+        });
+        const world = new RhostWorld(client);
+        await world.zone('MyZone');
+        expect(world.size).toBe(1);
+    });
+
+    it('throws if no dbref found in dig output', async () => {
+        const client = mockClient({ commandResults: [['Permission denied.']] });
+        const world = new RhostWorld(client);
+        await expect(world.zone('Forbidden')).rejects.toThrow(/could not parse dbref/i);
+    });
+
+    it('throws on \\n in name', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.zone('Zone\n@quit')).rejects.toThrow(/invalid/i);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// addToChannel()
+// ---------------------------------------------------------------------------
+
+describe('RhostWorld.addToChannel()', () => {
+    it('sends @channel/add chan=dbref', async () => {
+        const client = mockClient({ commandResults: [[]] });
+        const world = new RhostWorld(client);
+        await world.addToChannel('#42', 'Public');
+        expect(client.command).toHaveBeenCalledWith('@channel/add Public=#42');
+    });
+
+    it('throws on \\n in dbref', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.addToChannel('#42\n@quit', 'Public')).rejects.toThrow(/invalid/i);
+    });
+
+    it('throws on \\n in chan', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.addToChannel('#42', 'Public\n@quit')).rejects.toThrow(/invalid/i);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// grantQuota()
+// ---------------------------------------------------------------------------
+
+describe('RhostWorld.grantQuota()', () => {
+    it('sends @quota/set dbref=n', async () => {
+        const client = mockClient({ commandResults: [[]] });
+        const world = new RhostWorld(client);
+        await world.grantQuota('#42', 50);
+        expect(client.command).toHaveBeenCalledWith('@quota/set #42=50');
+    });
+
+    it('throws on \\n in dbref', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.grantQuota('#42\n@quit', 10)).rejects.toThrow(/invalid/i);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// wait()
+// ---------------------------------------------------------------------------
+
+describe('RhostWorld.wait()', () => {
+    it('resolves after the given number of milliseconds', async () => {
+        const world = new RhostWorld(mockClient());
+        const t0 = Date.now();
+        await world.wait(50);
+        expect(Date.now() - t0).toBeGreaterThanOrEqual(40);
+    });
+
+    it('does not affect world.size', async () => {
+        const world = new RhostWorld(mockClient());
+        await world.wait(0);
+        expect(world.size).toBe(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// mail()
+// ---------------------------------------------------------------------------
+
+describe('RhostWorld.mail()', () => {
+    it('sends @mail to=subj/body', async () => {
+        const client = mockClient({ commandResults: [[]] });
+        const world = new RhostWorld(client);
+        await world.mail('#42', 'Test subject', 'Hello body');
+        expect(client.command).toHaveBeenCalledWith('@mail #42=Test subject/Hello body');
+    });
+
+    it('throws on \\n in to', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.mail('#42\n@quit', 'subj', 'body')).rejects.toThrow(/invalid/i);
+    });
+
+    it('throws on \\n in subj', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.mail('#42', 'subj\n@quit', 'body')).rejects.toThrow(/invalid/i);
+    });
+
+    it('throws on \\n in body', async () => {
+        const world = new RhostWorld(mockClient());
+        await expect(world.mail('#42', 'subj', 'body\n@quit')).rejects.toThrow(/invalid/i);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // size getter
 // ---------------------------------------------------------------------------
 

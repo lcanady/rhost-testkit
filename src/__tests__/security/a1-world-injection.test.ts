@@ -100,6 +100,90 @@ describe('A-1: world.ts must reject newline/CR injection in all inputs', () => {
     });
 
     // -------------------------------------------------------------------------
+    // pemit()
+    // -------------------------------------------------------------------------
+
+    it('pemit() rejects target containing \\n', async () => {
+        await expect(world.pemit('#1\n@pemit me=INJECTED', 'msg')).rejects.toThrow(/invalid/i);
+    });
+
+    it('pemit() rejects msg containing \\n', async () => {
+        await expect(world.pemit('#1', 'msg\n@pemit me=INJECTED')).rejects.toThrow(/invalid/i);
+    });
+
+    // -------------------------------------------------------------------------
+    // remit()
+    // -------------------------------------------------------------------------
+
+    it('remit() rejects room containing \\n', async () => {
+        await expect(world.remit('#1\n@pemit me=INJECTED', 'msg')).rejects.toThrow(/invalid/i);
+    });
+
+    it('remit() rejects msg containing \\n', async () => {
+        await expect(world.remit('#1', 'msg\n@pemit me=INJECTED')).rejects.toThrow(/invalid/i);
+    });
+
+    // -------------------------------------------------------------------------
+    // force()
+    // -------------------------------------------------------------------------
+
+    it('force() rejects actor containing \\n', async () => {
+        await expect(world.force('#1\n@pemit me=INJECTED', 'say hi')).rejects.toThrow(/invalid/i);
+    });
+
+    it('force() rejects cmd containing \\n (shell execution vector)', async () => {
+        await expect(world.force('#1', 'say hi\n@nuke me')).rejects.toThrow(/invalid/i);
+    });
+
+    // -------------------------------------------------------------------------
+    // parent()
+    // -------------------------------------------------------------------------
+
+    it('parent() rejects child containing \\n', async () => {
+        await expect(world.parent('#1\n@pemit me=INJECTED', '#2')).rejects.toThrow(/invalid/i);
+    });
+
+    it('parent() rejects parent containing \\n', async () => {
+        await expect(world.parent('#1', '#2\n@pemit me=INJECTED')).rejects.toThrow(/invalid/i);
+    });
+
+    // -------------------------------------------------------------------------
+    // zone()
+    // -------------------------------------------------------------------------
+
+    it('zone() rejects name containing \\n', async () => {
+        await expect(world.zone('Zone\n@pemit me=INJECTED')).rejects.toThrow(/invalid/i);
+    });
+
+    // -------------------------------------------------------------------------
+    // addToChannel()
+    // -------------------------------------------------------------------------
+
+    it('addToChannel() rejects dbref containing \\n', async () => {
+        await expect(world.addToChannel('#1\n@pemit me=INJECTED', 'Public')).rejects.toThrow(/invalid/i);
+    });
+
+    it('addToChannel() rejects chan containing \\n', async () => {
+        await expect(world.addToChannel('#1', 'Public\n@pemit me=INJECTED')).rejects.toThrow(/invalid/i);
+    });
+
+    // -------------------------------------------------------------------------
+    // mail()
+    // -------------------------------------------------------------------------
+
+    it('mail() rejects to containing \\n', async () => {
+        await expect(world.mail('#1\n@pemit me=INJECTED', 'subj', 'body')).rejects.toThrow(/invalid/i);
+    });
+
+    it('mail() rejects subj containing \\n', async () => {
+        await expect(world.mail('#1', 'subj\n@pemit me=INJECTED', 'body')).rejects.toThrow(/invalid/i);
+    });
+
+    it('mail() rejects body containing \\n', async () => {
+        await expect(world.mail('#1', 'subj', 'body\n@pemit me=INJECTED')).rejects.toThrow(/invalid/i);
+    });
+
+    // -------------------------------------------------------------------------
     // get()
     // -------------------------------------------------------------------------
 
