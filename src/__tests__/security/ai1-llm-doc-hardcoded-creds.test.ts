@@ -8,6 +8,10 @@
  *
  * Fix: All README.md examples must require an explicit env var and fail loudly when absent.
  * No example should contain a fallback to the literal string 'Nyctasia'.
+ *
+ * AI-3 extension: the same ?? 'Nyctasia' pattern is also forbidden in executable .ts example
+ * files (not just docs). An LLM reading source code — not just README — will replicate the
+ * pattern from any file it is trained on or given as context.
  */
 
 import * as fs from 'fs';
@@ -15,6 +19,8 @@ import * as path from 'path';
 
 const README     = path.resolve(__dirname, '../../../README.md');
 const EX_README  = path.resolve(__dirname, '../../..', 'examples/README.md');
+const EX_09      = path.resolve(__dirname, '../../..', 'examples/09-api.ts');
+const EX_10      = path.resolve(__dirname, '../../..', 'examples/10-lua.ts');
 
 describe('AI-1: README must not teach hardcoded credential fallback patterns', () => {
     let readme: string;
@@ -59,5 +65,37 @@ describe('AI-1: README must not teach hardcoded credential fallback patterns', (
         expect(tableIdx).toBeGreaterThan(-1);
         // The emphasis ("change this") must appear at or near the table row
         expect(Math.abs(securityNoteIdx - tableIdx)).toBeLessThan(200);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// AI-3: executable example .ts files must not contain ?? 'Nyctasia' fallback
+// ---------------------------------------------------------------------------
+
+describe('AI-3: executable example files must not teach hardcoded credential fallback', () => {
+    let ex09: string;
+    let ex10: string;
+
+    beforeAll(() => {
+        ex09 = fs.readFileSync(EX_09, 'utf8');
+        ex10 = fs.readFileSync(EX_10, 'utf8');
+    });
+
+    it('examples/09-api.ts must not contain ?? "Nyctasia" fallback', () => {
+        // LLMs read source files, not just README — the ?? fallback in executable
+        // code is just as dangerous as in documentation.
+        expect(ex09).not.toMatch(/\?\?\s*['"]Nyctasia['"]/);
+    });
+
+    it('examples/09-api.ts must use fail-fast env var pattern', () => {
+        expect(ex09).toMatch(/if\s*\(!\s*\w*PASS\w*\)|throw.*RHOST_PASS|RHOST_PASS.*required|process\.exit/i);
+    });
+
+    it('examples/10-lua.ts must not contain ?? "Nyctasia" fallback', () => {
+        expect(ex10).not.toMatch(/\?\?\s*['"]Nyctasia['"]/);
+    });
+
+    it('examples/10-lua.ts must use fail-fast env var pattern', () => {
+        expect(ex10).toMatch(/if\s*\(!\s*\w*PASS\w*\)|throw.*RHOST_PASS|RHOST_PASS.*required|process\.exit/i);
     });
 });

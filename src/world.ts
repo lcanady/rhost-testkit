@@ -83,6 +83,7 @@ export class RhostWorld {
      * Gets an attribute by evaluating `get(dbref/ATTR)`.
      */
     async get(dbref: string, attr: string): Promise<string> {
+        this.guardInput('attr', attr);
         // Strip the '#' for the get() call — Rhost expects get(#42/ATTR)
         return (await this.client.eval(`get(${dbref}/${attr})`)).trim();
     }

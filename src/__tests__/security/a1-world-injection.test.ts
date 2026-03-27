@@ -100,6 +100,21 @@ describe('A-1: world.ts must reject newline/CR injection in all inputs', () => {
     });
 
     // -------------------------------------------------------------------------
+    // get()
+    // -------------------------------------------------------------------------
+
+    it('get() rejects attr containing \\n (injection into eval expression)', async () => {
+        // world.get() builds get(dbref/ATTR) and passes it to client.eval() via think.
+        // A \n in attr splits the TCP stream: "think get(#1/ATTR\r\n@pemit me=INJECTED)\r\n"
+        // → server sees "think get(#1/ATTR" and "@pemit me=INJECTED)"
+        await expect(world.get('#1', 'ATTR\n@pemit me=INJECTED')).rejects.toThrow(/invalid/i);
+    });
+
+    it('get() rejects attr containing \\r', async () => {
+        await expect(world.get('#1', 'ATTR\r')).rejects.toThrow(/invalid/i);
+    });
+
+    // -------------------------------------------------------------------------
     // Valid inputs still work (regression guard)
     // -------------------------------------------------------------------------
 

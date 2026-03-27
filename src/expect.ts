@@ -1,4 +1,5 @@
 import { RhostClient } from './client';
+import { SnapshotManager, formatSnapshotDiff } from './snapshots';
 
 export { isRhostError } from './assertions';
 import { isRhostError } from './assertions';
@@ -27,6 +28,16 @@ export class RhostExpectError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// Snapshot context (injected by the runner)
+// ---------------------------------------------------------------------------
+
+export interface SnapshotContext {
+    manager: SnapshotManager;
+    /** Full test name path, e.g. "Suite > Sub > Test Name" */
+    testName: string;
+}
+
+// ---------------------------------------------------------------------------
 // RhostExpect
 // ---------------------------------------------------------------------------
 
@@ -37,6 +48,9 @@ export class RhostExpectError extends Error {
  *   const ex = new RhostExpect(client, 'add(2,3)');
  *   await ex.toBe('5');
  *   await ex.not.toBe('42');
+ *
+ * @example Snapshot testing (requires runner context)
+ *   await expect('iter(lnum(1,10),##)').toMatchSnapshot();
  */
 export class RhostExpect {
     private _cached: string | undefined = undefined;
@@ -45,11 +59,12 @@ export class RhostExpect {
         private readonly client: RhostClient,
         private readonly expression: string,
         private readonly negated = false,
+        private readonly snapshotCtx?: SnapshotContext,
     ) {}
 
     /** Negation accessor — returns a new RhostExpect with negation flipped. */
     get not(): RhostExpect {
-        return new RhostExpect(this.client, this.expression, !this.negated);
+        return new RhostExpect(this.client, this.expression, !this.negated, this.snapshotCtx);
     }
 
     // -------------------------------------------------------------------------
@@ -186,5 +201,57 @@ export class RhostExpect {
         const actual = await this.resolve();
         const words = actual === '' ? [] : actual.split(sep).map((w) => w.trim()).filter(Boolean);
         this.pass(words.length === n, 'toHaveWordCount', actual, `list with ${n} word(s) (got ${words.length})`);
+    }
+
+    // -------------------------------------------------------------------------
+    // Snapshot matcher
+    // -------------------------------------------------------------------------
+
+    /**
+     * Compare the evaluated result against a stored snapshot.
+     *
+     * **First run**: the value is written to the snapshot file and the test passes.
+     * **Subsequent runs**: the value is compared to the stored snapshot. A mismatch
+     * fails the test and shows a diff.
+     * **Update mode**: pass `updateSnapshots: true` in `RunnerOptions`, or set the
+     * `RHOST_UPDATE_SNAPSHOTS=1` environment variable, to overwrite stored values.
+     *
+     * `.not.toMatchSnapshot()` is not supported and will throw.
+     *
+     * @example
+     *   await expect('iter(lnum(1,10),##)').toMatchSnapshot();
+     *   await expect('table(name,age,role)').toMatchSnapshot();
+     */
+    async toMatchSnapshot(): Promise<void> {
+        if (this.negated) {
+            throw new Error(
+                'expect().not.toMatchSnapshot() is not supported. ' +
+                'Snapshots are for locking in specific values, not for asserting inequality.'
+            );
+        }
+
+        if (!this.snapshotCtx) {
+            throw new Error(
+                'toMatchSnapshot() requires snapshot context. ' +
+                'Use runner.run() to run tests — do not call toMatchSnapshot() on a standalone RhostExpect.'
+            );
+        }
+
+        const actual = await this.resolve();
+        const key = this.snapshotCtx.manager.nextKey(this.snapshotCtx.testName);
+        const result = this.snapshotCtx.manager.check(key, actual);
+
+        if (result.status === 'mismatch') {
+            const diff = formatSnapshotDiff(result.expected!, actual);
+            throw new Error(
+                `Snapshot mismatch for "${key}"\n\n` +
+                `  - Snapshot  (stored)\n` +
+                `  + Received  (actual)\n\n` +
+                `${diff}\n\n` +
+                `Run with RHOST_UPDATE_SNAPSHOTS=1 to update the stored snapshot.`
+            );
+        }
+
+        // 'written', 'matched', 'updated' — all pass silently
     }
 }

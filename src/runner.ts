@@ -1,8 +1,10 @@
-import { RhostClient, RhostClientOptions } from './client';
+import * as path from 'path';
+import { RhostClient, RhostClientOptions, PreviewOptions } from './client';
 import { RhostAssert } from './assertions';
-import { RhostExpect } from './expect';
+import { RhostExpect, SnapshotContext } from './expect';
 import { RhostWorld } from './world';
 import { Reporter } from './reporter';
+import { SnapshotManager, SnapshotStats } from './snapshots';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -15,12 +17,30 @@ export interface RunResult {
     total: number;
     duration: number;
     failures: Array<{ suite: string; test: string; error: Error }>;
+    snapshots: SnapshotStats;
 }
 
 export interface TestContext {
     expect(expression: string): RhostExpect;
     client: RhostClient;
     world: RhostWorld;
+    /**
+     * Evaluate a softcode expression (default) or run a raw MUSH command and
+     * print the raw server output to stdout exactly as a player would see it —
+     * ANSI colours, formatting, all of it.
+     *
+     * Returns the raw string so you can still assert on it if needed.
+     *
+     * @example Softcode result with colour
+     *   await preview('ansi(rh,CRITICAL HIT!)');
+     *
+     * @example Room description as a player sees it
+     *   await preview('look here', { mode: 'command' });
+     *
+     * @example Score screen
+     *   await preview('score', { mode: 'command' });
+     */
+    preview(input: string, options?: PreviewOptions): Promise<string>;
 }
 
 export type TestFn = (ctx: TestContext) => Promise<void> | void;
@@ -46,6 +66,18 @@ export interface RunnerOptions extends RhostClientOptions {
     password: string;
     /** Print results to stdout while running. Default: true */
     verbose?: boolean;
+    /**
+     * Absolute or relative path to the snapshot file.
+     * Default: `__snapshots__/<calling-file>.snap` next to the test file,
+     * or `__snapshots__/testkit.snap` in cwd if the caller cannot be determined.
+     */
+    snapshotFile?: string;
+    /**
+     * Overwrite stored snapshots with current values instead of comparing.
+     * Also activated by the `RHOST_UPDATE_SNAPSHOTS=1` environment variable.
+     * Default: false
+     */
+    updateSnapshots?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +113,8 @@ interface SuiteNode {
  * Jest-style test runner for RhostMUSH softcode.
  *
  * Supports nested describes, it.skip/it.only, describe.skip/describe.only,
- * per-test timeouts, lifecycle hooks, and automatic world cleanup.
+ * per-test timeouts, lifecycle hooks, automatic world cleanup, and snapshot
+ * testing via `expect().toMatchSnapshot()`.
  *
  * @example
  *   const runner = new RhostRunner();
@@ -113,13 +146,22 @@ export class RhostRunner {
 
     async run(options: RunnerOptions): Promise<RunResult> {
         const verbose = options.verbose !== false;
+        const updateMode =
+            options.updateSnapshots === true ||
+            process.env['RHOST_UPDATE_SNAPSHOTS'] === '1';
+
+        const snapshotFile = this.resolveSnapshotFile(options);
+        const snapshots = new SnapshotManager(snapshotFile, updateMode);
+
         const client = new RhostClient(options);
         await client.connect();
         await client.login(options.username, options.password);
 
         const reporter = new Reporter(verbose);
         const result: RunResult = {
-            passed: 0, failed: 0, skipped: 0, total: 0, duration: 0, failures: [],
+            passed: 0, failed: 0, skipped: 0, total: 0, duration: 0,
+            failures: [],
+            snapshots: { matched: 0, written: 0, updated: 0, obsolete: 0 },
         };
         const start = Date.now();
 
@@ -132,9 +174,13 @@ export class RhostRunner {
             beforeAll: [], afterAll: [], beforeEach: [], afterEach: [],
         };
 
-        await this._runSuite(root, client, reporter, result, [], 0);
+        await this._runSuite(root, client, reporter, result, [], 0, [], snapshots);
 
         result.duration = Date.now() - start;
+
+        snapshots.save();
+        result.snapshots = snapshots.stats();
+
         reporter.summary(result);
 
         await client.disconnect();
@@ -191,6 +237,8 @@ export class RhostRunner {
         result: RunResult,
         inheritedBeforeEach: HookFn[],
         depth: number,
+        suitePath: string[],
+        snapshots: SnapshotManager,
     ): Promise<void> {
         // Skip entire suite if marked skip
         if (suite.mode === 'skip') {
@@ -205,6 +253,9 @@ export class RhostRunner {
 
         // Build the cumulative beforeEach/afterEach stack (inherited + suite-level)
         const combinedBeforeEach = [...inheritedBeforeEach, ...suite.beforeEach];
+
+        // Build the path for this suite's children
+        const childPath = suite.name ? [...suitePath, suite.name] : suitePath;
 
         // Run suite-level beforeAll hooks — if one throws, count all suite tests as failures
         const hookCtx = { client, world: new RhostWorld(client) };
@@ -224,10 +275,21 @@ export class RhostRunner {
                 const childWithMode: SuiteNode = effectiveMode !== child.mode
                     ? { ...child, mode: effectiveMode }
                     : child;
-                await this._runSuite(childWithMode, client, reporter, result, combinedBeforeEach, depth + (suite.name ? 1 : 0));
+                await this._runSuite(
+                    childWithMode, client, reporter, result, combinedBeforeEach,
+                    depth + (suite.name ? 1 : 0),
+                    childPath,
+                    snapshots,
+                );
             } else {
                 const skip = !activeChildren.includes(child) || child.mode === 'skip';
-                await this._runTest(child, skip, client, reporter, result, combinedBeforeEach, suite.afterEach, suite.name, depth + (suite.name ? 1 : 0));
+                await this._runTest(
+                    child, skip, client, reporter, result,
+                    combinedBeforeEach, suite.afterEach,
+                    childPath,
+                    depth + (suite.name ? 1 : 0),
+                    snapshots,
+                );
             }
         }
 
@@ -245,8 +307,9 @@ export class RhostRunner {
         result: RunResult,
         beforeEachHooks: HookFn[],
         afterEachHooks: HookFn[],
-        suiteName: string,
+        suitePath: string[],
         depth: number,
+        snapshots: SnapshotManager,
     ): Promise<void> {
         result.total++;
 
@@ -256,12 +319,26 @@ export class RhostRunner {
             return;
         }
 
+        // Full path used as the snapshot key prefix and for failure reporting
+        const testKey = [...suitePath, test.name].join(' > ');
+        const suiteName = suitePath[suitePath.length - 1] ?? '';
+
+        // Reset snapshot counter for this test
+        snapshots.resetCounter(testKey);
+
         const world = new RhostWorld(client);
         const hookCtx = { client, world };
+
+        const snapshotCtx: SnapshotContext = {
+            manager: snapshots,
+            testName: testKey,
+        };
+
         const testCtx: TestContext = {
             client,
             world,
-            expect: (expr: string) => new RhostExpect(client, expr),
+            expect: (expr: string) => new RhostExpect(client, expr, false, snapshotCtx),
+            preview: (input: string, opts?: PreviewOptions) => client.preview(input, opts),
         };
 
         // Run inherited + suite beforeEach — if one throws, count as a test failure
@@ -365,6 +442,48 @@ export class RhostRunner {
                 (err) => { clearTimeout(timer); reject(err); },
             );
         });
+    }
+
+    // -------------------------------------------------------------------------
+    // Snapshot file resolution
+    // -------------------------------------------------------------------------
+
+    private resolveSnapshotFile(options: RunnerOptions): string {
+        if (options.snapshotFile) return path.resolve(options.snapshotFile);
+
+        const callerFile = this.getCallerFile();
+        if (callerFile) {
+            const dir = path.dirname(callerFile);
+            const base = path.basename(callerFile);
+            return path.join(dir, '__snapshots__', `${base}.snap`);
+        }
+
+        return path.join(process.cwd(), '__snapshots__', 'testkit.snap');
+    }
+
+    /**
+     * Walk the Error.stack to find the first file that is not the runner
+     * itself and not inside node_modules. Used to auto-derive the snapshot
+     * file path from the test file's location.
+     */
+    private getCallerFile(): string | null {
+        const lines = (new Error().stack ?? '').split('\n').slice(1);
+        for (const line of lines) {
+            const match =
+                line.match(/\((.+?):\d+:\d+\)/) ??
+                line.match(/at (.+?):\d+:\d+\s*$/);
+            if (!match) continue;
+            const file = match[1];
+            if (!file) continue;
+            if (
+                file.includes('node_modules') ||
+                file.startsWith('internal/') ||
+                file.startsWith('node:') ||
+                /[\\/]runner\.[jt]s$/.test(file)
+            ) continue;
+            return file;
+        }
+        return null;
     }
 }
 

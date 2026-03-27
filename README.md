@@ -23,9 +23,12 @@ npm install @rhost/testkit
 - [Quick start](#quick-start)
 - [API reference — RhostRunner](#api-reference--rhostrunner)
 - [API reference — RhostExpect](#api-reference--rhostexpect)
+- [Snapshot testing](#snapshot-testing)
 - [API reference — RhostWorld](#api-reference--rhostworld)
 - [API reference — RhostClient](#api-reference--rhostclient)
 - [API reference — RhostContainer](#api-reference--rhostcontainer)
+- [Offline validator](#offline-validator)
+- [Watch mode](#watch-mode)
 - [MUSH output format](#mush-output-format)
 - [Using with LLM skills](#using-with-llm-skills)
 - [Environment variables](#environment-variables)
@@ -39,7 +42,11 @@ npm install @rhost/testkit
 
 - **Eval** softcode expressions and capture their output
 - **Assert** results with a Jest-like `expect()` API and MUSH-aware matchers
+- **Snapshot test** softcode output — first run writes, subsequent runs compare with a diff on mismatch
+- **Preview** raw server output exactly as a MUSH client sees it — ANSI colours and all
 - **Manage fixtures** — create objects, set attributes, and auto-destroy everything after each test
+- **Validate softcode offline** — catch syntax errors and wrong arg counts without a server
+- **Watch mode** — re-run tests on save with a 300ms debounce
 - **Spin up RhostMUSH in Docker** for isolated, reproducible CI runs
 - **Report** results with a pretty, indented pass/fail tree
 
@@ -251,9 +258,10 @@ interface SuiteContext {
 
 ```typescript
 interface TestContext {
-    expect(expression: string): RhostExpect   // create an expect for a softcode expression
-    client: RhostClient                        // the live MUSH connection
-    world:  RhostWorld                         // fresh per-test fixture manager (auto-cleaned)
+    expect(expression: string): RhostExpect              // create an expect for a softcode expression
+    preview(input: string, opts?: PreviewOptions): Promise<string>  // print raw server output
+    client: RhostClient                                  // the live MUSH connection
+    world:  RhostWorld                                   // fresh per-test fixture manager (auto-cleaned)
 }
 ```
 
@@ -323,6 +331,7 @@ await expect('add(1,1)').not.toBeError();
 | `.toBeDbref()` | Result matches `/^#\d+$/` (a positive object reference). |
 | `.toContainWord(word: string, sep?: string)` | Word is present in the space-delimited list (or custom separator). |
 | `.toHaveWordCount(n: number, sep?: string)` | List has exactly `n` words. Empty string has 0. |
+| `.toMatchSnapshot()` | Compare output against a stored snapshot; writes on first run. |
 
 ### Failure message format
 
@@ -350,6 +359,45 @@ await ex.not.toBe('6');  // expression is already cached from toBe() above
 
 await client.disconnect();
 ```
+
+---
+
+## Snapshot testing
+
+Snapshot tests lock in the output of a softcode expression. The first run writes the value to a `.snap` file; subsequent runs compare against it and diff on mismatch.
+
+```typescript
+runner.describe('iter output', ({ it }) => {
+    it('produces the right sequence', async ({ expect }) => {
+        await expect('iter(lnum(1,5),##)').toMatchSnapshot();
+    });
+});
+```
+
+On first run, a file like `__snapshots__/my-tests.test.ts.snap` is created:
+```json
+{
+  "iter output > produces the right sequence: 1": "1 2 3 4 5"
+}
+```
+
+On subsequent runs the stored value is compared. If it differs, the test fails with a line-by-line diff:
+```
+- 1 2 3 4 5
++ 1 2 3 4 5 6
+```
+
+To update all snapshots (e.g. after an intentional change):
+
+```bash
+RHOST_UPDATE_SNAPSHOTS=1 npx ts-node my-tests.test.ts
+```
+
+Or pass `updateSnapshots: true` to `runner.run()`.
+
+The runner prints a snapshot summary after each run: `Snapshots: 3 passed, 1 written, 0 updated`.
+
+**Snapshot key format:** `"Suite > Sub-suite > Test name: N"` — where `N` is the 1-based call count within the test. Calling `.toMatchSnapshot()` twice in one test produces two separate keys.
 
 ---
 
@@ -479,6 +527,32 @@ await client.command(cmd: string, timeout?: number): Promise<string[]>
 Sends a MUSH command and captures all output lines until the sentinel. Returns an array of lines (may be empty).
 
 ```typescript
+await client.preview(input: string, options?: PreviewOptions): Promise<string>
+```
+Evaluate an expression or run a command and print the raw server output to stdout exactly as a MUSH client receives it — ANSI colours, formatting codes, and all. Output is rendered in a labelled frame. Returns the raw string so you can still assert on it.
+
+**`PreviewOptions`:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `mode` | `'eval' \| 'command'` | `'eval'` | `'eval'` wraps in `think`; `'command'` sends as a raw MUSH command |
+| `label` | `string` | the input string | Custom frame header label |
+| `timeout` | `number` | client default | Per-call timeout (ms) |
+| `print` | `boolean` | `true` | Set `false` to suppress stdout and only use the return value |
+
+```typescript
+// Softcode expression — see the raw colour output
+await preview('ansi(rh,CRITICAL HIT!)');
+
+// Room description as a player sees it
+await preview('look here', { mode: 'command' });
+
+// Assert without printing
+const raw = await preview('ansi(b,test)', { print: false });
+expect(stripAnsi(raw)).toBe('test');
+```
+
+```typescript
 client.onLine(handler: (line: string) => void): void
 client.offLine(handler: (line: string) => void): void
 ```
@@ -576,6 +650,76 @@ const result = await runner.run({
 await container.stop();
 process.exit(result.failed > 0 ? 1 : 0);
 ```
+
+---
+
+## Offline validator
+
+Validate softcode expressions without a server connection. Catches structural errors (unbalanced parens/brackets), wrong argument counts, and unknown built-in functions.
+
+### Programmatic API
+
+```typescript
+import { validate, validateFile } from '@rhost/testkit/validator';
+
+const result = validate('add(2,3)');
+// result.valid       => true
+// result.diagnostics => []
+
+const bad = validate('add(2,3');
+// bad.valid                 => false
+// bad.diagnostics[0].code   => 'E001'
+// bad.diagnostics[0].message => "Unclosed '(' ..."
+```
+
+```typescript
+const result = validateFile('./mycode.mush');
+```
+
+### CLI
+
+```bash
+npx rhost-testkit validate "add(2,3)"
+npx rhost-testkit validate --file mycode.mush
+npx rhost-testkit validate --json "abs(1,2)"   # machine-readable output
+```
+
+Exit code `0` = valid (warnings allowed), `1` = one or more errors.
+
+### Diagnostic codes
+
+| Code | Severity | Meaning |
+|------|----------|---------|
+| `E001` | error | Unclosed `(` |
+| `E002` | error | Unexpected `)` |
+| `E003` | error | Unclosed `[` |
+| `E004` | error | Unexpected `]` |
+| `E006` | error | Too few arguments for known built-in |
+| `E007` | error | Too many arguments for known built-in |
+| `W001` | warning | Empty expression |
+| `W002` | warning | Empty argument (e.g. `add(,3)`) |
+| `W003` | warning | Deprecated function |
+| `W005` | warning | Unknown function name (may be a UDF) |
+
+---
+
+## Watch mode
+
+Re-run test files automatically on save.
+
+```bash
+# Auto-discover *.test.ts / *.spec.ts under the current directory
+npx rhost-testkit watch
+
+# Watch specific files
+npx rhost-testkit watch src/__tests__/math.test.ts
+
+# Options
+npx rhost-testkit watch --debounce 500   # longer debounce (default: 300ms)
+npx rhost-testkit watch --no-clear       # don't clear terminal between runs
+```
+
+TypeScript files are run with `ts-node --transpile-only`. Plain JS files are run with Node directly. Watch mode exits cleanly on Ctrl+C.
 
 ---
 

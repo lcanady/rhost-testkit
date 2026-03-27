@@ -60,7 +60,8 @@ const API_PORT = Number(process.env.RHOST_API_PORT ?? 4202);
 const MUSH_HOST = process.env.RHOST_HOST    ?? 'localhost';
 const MUSH_PORT = Number(process.env.RHOST_PORT    ?? 4201);
 const USER      = process.env.RHOST_USER    ?? 'Wizard';
-const PASS      = process.env.RHOST_PASS    ?? 'Nyctasia';
+const PASS      = process.env.RHOST_PASS;
+if (!PASS) { console.error('Error: RHOST_PASS env var is required. Set it to the Wizard password.'); process.exit(1); }
 
 // ── Lightweight HTTP API client ─────────────────────────────────────────────
 

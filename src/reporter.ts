@@ -1,4 +1,5 @@
 import { RunResult } from './runner';
+import { SnapshotStats } from './snapshots';
 
 // ---------------------------------------------------------------------------
 // ANSI color helpers
@@ -13,6 +14,7 @@ function colorize(code: string, text: string): string {
 const green  = (s: string) => colorize('32', s);
 const red    = (s: string) => colorize('31', s);
 const yellow = (s: string) => colorize('33', s);
+const cyan   = (s: string) => colorize('36', s);
 const gray   = (s: string) => colorize('90', s);
 const bold   = (s: string) => colorize('1',  s);
 
@@ -59,6 +61,28 @@ export class Reporter {
         if (result.failed > 0)  parts.push(red(`${result.failed} failed`));
         if (result.skipped > 0) parts.push(yellow(`${result.skipped} skipped`));
         parts.push(`${result.total} total`);
-        process.stdout.write(`\nTests: ${parts.join(', ')} (${result.duration}ms)\n`);
+        process.stdout.write(`\nTests:     ${parts.join(', ')} ${gray(`(${result.duration}ms)`)}\n`);
+        this.snapshotSummary(result.snapshots);
+    }
+
+    snapshotSummary(stats: SnapshotStats): void {
+        if (!this.verbose) return;
+        const { matched, written, updated, obsolete } = stats;
+        const total = matched + written + updated;
+        if (total === 0 && obsolete === 0) return;
+
+        const parts: string[] = [];
+        if (matched > 0)  parts.push(green(`${matched} passed`));
+        if (written > 0)  parts.push(cyan(`${written} written`));
+        if (updated > 0)  parts.push(yellow(`${updated} updated`));
+        if (obsolete > 0) parts.push(gray(`${obsolete} obsolete`));
+
+        process.stdout.write(`Snapshots: ${parts.join(', ')}\n`);
+
+        if (obsolete > 0) {
+            process.stdout.write(
+                gray(`           Run with RHOST_UPDATE_SNAPSHOTS=1 to remove obsolete snapshots.\n`)
+            );
+        }
     }
 }

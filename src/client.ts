@@ -43,6 +43,31 @@ export interface RhostClientOptions {
     connectTimeout?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Preview options
+// ---------------------------------------------------------------------------
+
+export interface PreviewOptions {
+    /**
+     * How to send the input to the server.
+     * - `'eval'`    — wraps in `think`, returning the softcode result (default)
+     * - `'command'` — sends as a raw MUSH command, capturing all output lines
+     */
+    mode?: 'eval' | 'command';
+    /**
+     * Label shown in the preview frame header.
+     * Defaults to the expression/command string (truncated if long).
+     */
+    label?: string;
+    /** Timeout in ms. Defaults to the client's default timeout. */
+    timeout?: number;
+    /**
+     * Write the preview to stdout automatically.  Default: true.
+     * Set to false to suppress output and only use the return value.
+     */
+    print?: boolean;
+}
+
 /**
  * High-level client for interacting with a RhostMUSH server.
  *
@@ -108,29 +133,7 @@ export class RhostClient {
      *   await client.eval('encode64(hello)')    // => 'aGVsbG8='
      */
     async eval(expression: string, timeout?: number): Promise<string> {
-        if (this.paceMs > 0) {
-            await new Promise((r) => setTimeout(r, this.paceMs));
-        }
-        const id = this.makeId();
-        const startMarker = `RHOST_EVAL_START_${id}`;
-        const endMarker = `RHOST_EVAL_END_${id}`;
-        const ms = timeout ?? this.defaultTimeout;
-
-        this.conn.send(`@pemit me=${startMarker}`);
-        this.conn.send(`think ${expression}`);
-        this.conn.send(`@pemit me=${endMarker}`);
-
-        await this.readUntilMarker(startMarker, ms);
-
-        const resultLines: string[] = [];
-        while (true) {
-            const line = await this.conn.lines.next(ms);
-            const clean = this.doStripAnsi ? stripAnsi(line) : line;
-            if (clean.includes(endMarker)) break;
-            resultLines.push(clean);
-        }
-
-        return resultLines.join('\n');
+        return this._collectEval(expression, this.doStripAnsi, timeout);
     }
 
     /**
@@ -142,22 +145,51 @@ export class RhostClient {
      *   const lines = await client.command('@pemit me=hello');
      */
     async command(cmd: string, timeout?: number): Promise<string[]> {
-        const id = this.makeId();
-        const endMarker = `RHOST_CMD_END_${id}`;
-        const ms = timeout ?? this.defaultTimeout;
+        return this._collectCommand(cmd, this.doStripAnsi, timeout);
+    }
 
-        this.conn.send(cmd);
-        this.conn.send(`@pemit me=${endMarker}`);
+    /**
+     * Evaluate an expression or run a command and print the raw server output
+     * to stdout exactly as a MUSH client would receive it — ANSI colours,
+     * formatting codes, and all.
+     *
+     * The output is framed in a labelled box so it is clearly demarcated in
+     * test output.  The raw string is also returned so you can assert on it
+     * if needed.
+     *
+     * By default (`mode: 'eval'`) the input is wrapped in `think`, so it
+     * should be a softcode expression.  Pass `mode: 'command'` to send a raw
+     * MUSH command instead (e.g. `'look here'`, `'score'`, `'@pemit me=hi'`).
+     *
+     * @example Softcode expression
+     *   await client.preview('ansi(r,Hello!)');
+     *   await client.preview('iter(lnum(1,5),##)');
+     *
+     * @example Raw command (room description, score screen, etc.)
+     *   await client.preview('look here', { mode: 'command' });
+     *   await client.preview('score',     { mode: 'command' });
+     *
+     * @example Suppress auto-print and only use the return value
+     *   const raw = await client.preview('ansi(b,test)', { print: false });
+     *   expect(stripAnsi(raw)).toBe('test');
+     */
+    async preview(input: string, options: PreviewOptions = {}): Promise<string> {
+        const mode = options.mode ?? 'eval';
+        const timeout = options.timeout;
+        const doPrint = options.print !== false;
 
-        const lines: string[] = [];
-        while (true) {
-            const line = await this.conn.lines.next(ms);
-            const clean = this.doStripAnsi ? stripAnsi(line) : line;
-            if (clean.includes(endMarker)) break;
-            lines.push(clean);
+        // Always collect raw output (never strip) for preview
+        const raw =
+            mode === 'eval'
+                ? await this._collectEval(input, false, timeout)
+                : (await this._collectCommand(input, false, timeout)).join('\n');
+
+        if (doPrint) {
+            const label = options.label ?? (input.length > 60 ? input.slice(0, 57) + '…' : input);
+            printPreviewFrame(label, raw, mode);
         }
 
-        return lines;
+        return raw;
     }
 
     /** Subscribe to every raw line received from the server. */
@@ -177,6 +209,63 @@ export class RhostClient {
             // already closed
         }
         await this.conn.close();
+    }
+
+    // -------------------------------------------------------------------------
+    // Private: core collect helpers (shared by eval/command/preview)
+    // -------------------------------------------------------------------------
+
+    private async _collectEval(
+        expression: string,
+        strip: boolean,
+        timeout?: number,
+    ): Promise<string> {
+        if (this.paceMs > 0) {
+            await new Promise((r) => setTimeout(r, this.paceMs));
+        }
+        const id = this.makeId();
+        const startMarker = `RHOST_EVAL_START_${id}`;
+        const endMarker = `RHOST_EVAL_END_${id}`;
+        const ms = timeout ?? this.defaultTimeout;
+
+        this.conn.send(`@pemit me=${startMarker}`);
+        this.conn.send(`think ${expression}`);
+        this.conn.send(`@pemit me=${endMarker}`);
+
+        await this.readUntilMarker(startMarker, ms);
+
+        const resultLines: string[] = [];
+        while (true) {
+            const line = await this.conn.lines.next(ms);
+            const clean = strip ? stripAnsi(line) : line;
+            if ((strip ? clean : stripAnsi(line)).includes(endMarker)) break;
+            resultLines.push(clean);
+        }
+
+        return resultLines.join('\n');
+    }
+
+    private async _collectCommand(
+        cmd: string,
+        strip: boolean,
+        timeout?: number,
+    ): Promise<string[]> {
+        const id = this.makeId();
+        const endMarker = `RHOST_CMD_END_${id}`;
+        const ms = timeout ?? this.defaultTimeout;
+
+        this.conn.send(cmd);
+        this.conn.send(`@pemit me=${endMarker}`);
+
+        const lines: string[] = [];
+        while (true) {
+            const line = await this.conn.lines.next(ms);
+            const clean = strip ? stripAnsi(line) : line;
+            if ((strip ? clean : stripAnsi(line)).includes(endMarker)) break;
+            lines.push(clean);
+        }
+
+        return lines;
     }
 
     // -------------------------------------------------------------------------
@@ -205,4 +294,40 @@ export class RhostClient {
     private makeId(): string {
         return randomUUID().replace(/-/g, '').slice(0, 16).toUpperCase();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Preview frame renderer
+// ---------------------------------------------------------------------------
+
+const USE_COLOR = process.stdout.isTTY !== false;
+const c = (code: string, s: string) => USE_COLOR ? `\x1b[${code}m${s}\x1b[0m` : s;
+
+function printPreviewFrame(label: string, content: string, mode: 'eval' | 'command'): void {
+    const termWidth = (process.stdout.columns ?? 80) - 2;
+    const frameColor = mode === 'eval' ? '36' : '33'; // cyan for eval, yellow for command
+    const modeTag = mode === 'eval' ? 'softcode' : 'command';
+
+    // Header line: ─── preview [softcode]: <label> ─────────────
+    const headerLeft = ` preview [${modeTag}]: `;
+    const headerFull = `${headerLeft}${label} `;
+    const headerPad = Math.max(0, termWidth - headerFull.length);
+    const header = c(frameColor, '─'.repeat(3) + headerFull + '─'.repeat(headerPad));
+
+    // Footer line: ─────────────────────────────────────────────
+    const footer = c(frameColor, '─'.repeat(termWidth));
+
+    process.stdout.write('\n' + header + '\n');
+
+    if (content === '') {
+        process.stdout.write(c('90', '  (empty output)\n'));
+    } else {
+        // Prefix each line with a subtle left margin
+        const lines = content.split('\n');
+        for (const line of lines) {
+            process.stdout.write('  ' + line + '\n');
+        }
+    }
+
+    process.stdout.write(footer + '\n\n');
 }

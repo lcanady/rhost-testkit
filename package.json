@@ -1,19 +1,27 @@
 {
   "name": "@rhost/testkit",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "SDK for programmatically testing MUSHcode against a RhostMUSH server",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "rhost-testkit": "./dist/cli/index.js"
+  },
   "exports": {
     ".": {
       "require": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./validator": {
+      "require": "./dist/validator/index.js",
+      "types": "./dist/validator/index.d.ts"
     }
   },
   "files": [
     "dist",
     "README.md",
-    "SECURITY.md"
+    "SECURITY.md",
+    "ROADMAP.md"
   ],
   "repository": {
     "type": "git",
@@ -27,7 +35,7 @@
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run build && npm test",
     "dev": "tsc --watch",
-    "test": "jest --testPathPattern='src/__tests__/[^/]+\\.test\\.ts$'",
+    "test": "jest --testPathPattern='src/__tests__/(?!.*integration).*\\.test\\.ts$'",
     "test:integration": "jest --testPathPattern='integration' --testTimeout=180000",
     "test:all": "jest",
     "example:basic": "npx ts-node examples/basic.ts",

@@ -1,5 +1,5 @@
 // Core client
-export { RhostClient, RhostClientOptions, stripAnsi } from './client';
+export { RhostClient, RhostClientOptions, PreviewOptions, stripAnsi } from './client';
 
 // Connection
 export { MushConnection } from './connection';
@@ -31,3 +31,20 @@ export {
     ItFn,
     DescribeFn,
 } from './runner';
+
+// Offline softcode validator
+export {
+    validate,
+    validateFile,
+    ValidationResult,
+    Diagnostic,
+    Severity,
+    FunctionSignature,
+    BUILTIN_FUNCTIONS,
+} from './validator';
+
+// Snapshot manager
+export { SnapshotManager, SnapshotStats, SnapshotStatus, SnapshotCheckResult, formatSnapshotDiff } from './snapshots';
+
+// Watch mode
+export { RhostWatcher, WatchOptions, discoverTestFiles } from './watcher';
