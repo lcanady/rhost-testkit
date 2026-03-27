@@ -15,7 +15,7 @@ import * as child_process from 'child_process';
 import * as fs            from 'fs';
 import * as path          from 'path';
 
-const MATH_SH = path.resolve(__dirname, '../../../../scripts/math.sh');
+const MATH_SH = path.resolve(__dirname, '../../../scripts/math.sh');
 
 function runMath(a: string, b: string, op: string): string {
     const result = child_process.spawnSync('bash', [MATH_SH, `${a} | ${b} | ${op}`], {

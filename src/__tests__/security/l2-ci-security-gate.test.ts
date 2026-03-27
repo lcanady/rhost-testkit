@@ -13,7 +13,7 @@
 import * as fs   from 'fs';
 import * as path from 'path';
 
-const REPO_ROOT = path.resolve(__dirname, '../../../../');
+const REPO_ROOT = path.resolve(__dirname, '../../../');
 const WORKFLOW_DIR = path.join(REPO_ROOT, '.github', 'workflows');
 
 describe('L-2: CI security gate must exist', () => {

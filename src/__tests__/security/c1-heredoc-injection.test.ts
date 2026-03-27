@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-const ENTRYPOINT = path.resolve(__dirname, '../../../../entrypoint.sh');
+const ENTRYPOINT = path.resolve(__dirname, '../../../entrypoint.sh');
 const MARKER     = path.join(os.tmpdir(), `rhost_sec_c1_${process.pid}`);
 
 afterEach(() => { try { fs.unlinkSync(MARKER); } catch { /* already gone */ } });

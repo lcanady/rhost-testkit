@@ -12,7 +12,7 @@
 import * as fs   from 'fs';
 import * as path from 'path';
 
-const WORKFLOW_DIR = path.resolve(__dirname, '../../../../.github/workflows');
+const WORKFLOW_DIR = path.resolve(__dirname, '../../../.github/workflows');
 
 function readSecurityWorkflow(): string {
     const files = fs.existsSync(WORKFLOW_DIR)

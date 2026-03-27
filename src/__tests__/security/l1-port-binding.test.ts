@@ -15,7 +15,7 @@
 import * as fs   from 'fs';
 import * as path from 'path';
 
-const COMPOSE = path.resolve(__dirname, '../../../../docker-compose.yml');
+const COMPOSE = path.resolve(__dirname, '../../../docker-compose.yml');
 
 describe('L-1: docker-compose.yml must bind ports to 127.0.0.1 by default', () => {
     let src: string;

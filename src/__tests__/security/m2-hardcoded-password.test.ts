@@ -15,8 +15,8 @@
 import * as fs   from 'fs';
 import * as path from 'path';
 
-const ENTRYPOINT  = path.resolve(__dirname, '../../../../entrypoint.sh');
-const COMPOSE     = path.resolve(__dirname, '../../../../docker-compose.yml');
+const ENTRYPOINT  = path.resolve(__dirname, '../../../entrypoint.sh');
+const COMPOSE     = path.resolve(__dirname, '../../../docker-compose.yml');
 const EXAMPLE_09  = path.resolve(__dirname, '../../..', 'examples/09-api.ts');
 const EXAMPLE_10  = path.resolve(__dirname, '../../..', 'examples/10-lua.ts');
 
