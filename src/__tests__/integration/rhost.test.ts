@@ -272,6 +272,11 @@ describe('World fixtures', () => {
 // RhostRunner used inside an integration test
 // ---------------------------------------------------------------------------
 
+// TypeScript incorrectly narrows `expect` as TestContext.expect (string-only) within
+// `it` callbacks that contain runner.describe() blocks with `async ({ expect }) => ...`
+// inner callbacks.  Alias to jest.Expect here to preserve the correct overload.
+const jestExpect = expect as unknown as jest.Expect;
+
 describe('RhostRunner end-to-end', () => {
     it('runs a suite with nested describes and skip/only', async () => {
         const { host, port } = container.getConnectionInfo();
@@ -297,9 +302,9 @@ describe('RhostRunner end-to-end', () => {
             verbose: false,
         });
 
-        expect(result.passed).toBe(4);
-        expect(result.skipped).toBe(1);
-        expect(result.failed).toBe(0);
+        jestExpect(result.passed).toBe(4);
+        jestExpect(result.skipped).toBe(1);
+        jestExpect(result.failed).toBe(0);
     });
 
     it('.not assertions work end-to-end', async () => {
@@ -312,8 +317,8 @@ describe('RhostRunner end-to-end', () => {
         });
 
         const result = await runner.run({ host, port, username: 'Wizard', password: 'Nyctasia', verbose: false });
-        expect(result.passed).toBe(2);
-        expect(result.failed).toBe(0);
+        jestExpect(result.passed).toBe(2);
+        jestExpect(result.failed).toBe(0);
     });
 
     it('world fixtures work inside RhostRunner', async () => {
@@ -330,7 +335,7 @@ describe('RhostRunner end-to-end', () => {
         });
 
         const result = await runner.run({ host, port, username: 'Wizard', password: 'Nyctasia', verbose: false });
-        expect(result.passed).toBe(1);
-        expect(result.failed).toBe(0);
+        jestExpect(result.passed).toBe(1);
+        jestExpect(result.failed).toBe(0);
     });
 });
