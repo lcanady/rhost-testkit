@@ -1,0 +1,77 @@
+{
+  "name": "@rhost/testkit",
+  "version": "0.1.0",
+  "description": "SDK for programmatically testing MUSHcode against a RhostMUSH server",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "SECURITY.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RhostMUSH/rhostmush-docker.git",
+    "directory": "sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/RhostMUSH/rhostmush-docker/issues"
+  },
+  "homepage": "https://github.com/RhostMUSH/rhostmush-docker/tree/main/sdk#readme",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build && npm test",
+    "dev": "tsc --watch",
+    "test": "jest --testPathPattern='src/__tests__/[^/]+\\.test\\.ts$'",
+    "test:integration": "jest --testPathPattern='integration' --testTimeout=180000",
+    "test:all": "jest",
+    "example:basic": "npx ts-node examples/basic.ts",
+    "example:01": "npx ts-node examples/01-functions.ts",
+    "example:02": "npx ts-node examples/02-rhost-specific.ts",
+    "example:03": "npx ts-node examples/03-attributes.ts",
+    "example:04": "npx ts-node examples/04-triggers.ts",
+    "example:05": "npx ts-node examples/05-runner-features.ts",
+    "example:06": "npx ts-node examples/06-game-system.ts",
+    "example:07": "npx ts-node examples/07-direct-client.ts",
+    "example:08": "npx ts-node examples/08-execscript.ts",
+    "example:09": "npx ts-node examples/09-api.ts",
+    "example:10": "npx ts-node examples/10-lua.ts",
+    "examples": "npx ts-node examples/01-functions.ts && npx ts-node examples/02-rhost-specific.ts && npx ts-node examples/03-attributes.ts && npx ts-node examples/04-triggers.ts && npx ts-node examples/05-runner-features.ts && npx ts-node examples/06-game-system.ts",
+    "examples:power": "npx ts-node examples/08-execscript.ts && npx ts-node examples/09-api.ts && npx ts-node examples/10-lua.ts"
+  },
+  "keywords": [
+    "mush",
+    "rhostmush",
+    "rhost",
+    "testing",
+    "mushcode",
+    "mud"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "testcontainers": "^11.13.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/src/__tests__/**/*.test.ts"
+    ],
+    "testTimeout": 15000,
+    "testPathIgnorePatterns": []
+  }
+}
