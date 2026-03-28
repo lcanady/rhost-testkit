@@ -165,6 +165,15 @@ export class SnapshotManager {
       sorted[key] = toWrite[key];
     }
 
+    // If there's nothing to write, don't create (or leave) an empty snapshot file.
+    // An empty {} file would be flagged as obsolete by Jest and cause exit code 1.
+    if (Object.keys(sorted).length === 0) {
+      if (fs.existsSync(this.filePath)) {
+        fs.unlinkSync(this.filePath);
+      }
+      return;
+    }
+
     const dir = path.dirname(this.filePath);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(this.filePath, JSON.stringify(sorted, null, 2) + '\n', 'utf-8');

@@ -6,3 +6,5 @@ coverage/
 .env
 .env.*
 !.env.example
+# Integration test snapshots regenerate on each live run — don't commit them
+src/__tests__/integration/__snapshots__/
