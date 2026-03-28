@@ -36,6 +36,13 @@ export interface RhostClientOptions {
      */
     paceMs?: number;
     /**
+     * Milliseconds to wait after sending a command and before sending the
+     * sentinel. Useful when commands produce deferred output (e.g. via
+     * @trigger or @wait 0) that arrives after the main response.
+     * Default: 0
+     */
+    commandSettleMs?: number;
+    /**
      * Timeout in milliseconds for the raw TCP connection to be established.
      * If the server accepts the socket but then stalls, the connect will be
      * aborted after this many milliseconds. Default: 10000
@@ -84,6 +91,7 @@ export class RhostClient {
     private bannerTimeout: number;
     private doStripAnsi: boolean;
     private paceMs: number;
+    private commandSettleMs: number;
 
     private connectTimeout: number;
 
@@ -92,6 +100,7 @@ export class RhostClient {
         this.defaultTimeout = options.timeout ?? 10000;
         this.bannerTimeout = options.bannerTimeout ?? 300;
         this.doStripAnsi = options.stripAnsi !== false;
+        this.commandSettleMs = options.commandSettleMs ?? 0;
         this.paceMs = options.paceMs ?? 0;
         this.connectTimeout = options.connectTimeout ?? 10000;
     }
@@ -261,6 +270,9 @@ export class RhostClient {
         const ms = timeout ?? this.defaultTimeout;
 
         this.conn.send(cmd);
+        if (this.commandSettleMs > 0) {
+            await new Promise(r => setTimeout(r, this.commandSettleMs));
+        }
         this.conn.send(`@pemit me=${endMarker}`);
 
         const lines: string[] = [];
