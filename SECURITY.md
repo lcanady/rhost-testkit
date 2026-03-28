@@ -96,6 +96,17 @@ Remaining fix: examples should refuse to run against non-localhost hosts without
 
 ---
 
+### Audit — 2026-03-28 ✓ FIXED
+
+| ID | Severity | File | Finding | Fix |
+|----|----------|------|---------|-----|
+| M-NEW-1 | MEDIUM | `src/config.ts:56,59` | `loadConfig()` resolved `scriptsDir`/`mushConfig` with `path.resolve()`, allowing absolute paths or `../..` traversal to escape the project root. A tampered `rhost.config.json` could cause arbitrary host directories to be copied into Docker containers. | Added `resolveConfined()` guard: throws if resolved path does not start with the project root. Tests: `h3-config-path-traversal.test.ts` (8 tests). |
+| L-NEW-1 | LOW | `src/__tests__/security/` | No security test for config path traversal guard | Covered by `h3-config-path-traversal.test.ts` above |
+| L-NEW-2 | LOW | `.github/workflows/security-tests.yml` | Missing `permissions:` block; default GitHub token scopes depend on org policy | Added `permissions: contents: read` |
+| H-NEW-1 | LOW | `scripts/jobs_db.py` | Raw psycopg2 exception strings (including `DETAIL:`, `HINT:` lines) returned to MUSH callers via `err(str(e))`, exposing schema internals | Added `_sanitize_db_error()` that strips diagnostic lines before returning; wired into both exception handlers. Tests: `h4-db-error-detail-leak.test.ts` (3 tests). |
+
+---
+
 ### Fixed (previous audit cycles)
 
 | ID | Severity | File | Finding | Fix |

@@ -1,7 +1,20 @@
 services:
+  postgres:
+    image: postgres:16
+    container_name: rhostmush_postgres
+    environment:
+      POSTGRES_USER: ${PGUSER:-mush}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-mushpass}
+      POSTGRES_DB: ${PGDATABASE:-jobs}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   rhostmush:
     build: .
     container_name: rhostmush
+    depends_on:
+      - postgres
     ports:
       - "127.0.0.1:${RHOST_PORT:-4201}:4201"
       - "127.0.0.1:${RHOST_API_PORT:-4202}:4202"
@@ -12,4 +25,12 @@ services:
       - RHOST_MUD_NAME=${RHOST_MUD_NAME:-RhostMUSH}
       - RHOST_API_PORT=${RHOST_API_PORT:-4202}
       - RHOST_PASS=${RHOST_PASS:-Nyctasia}
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=${PGUSER:-mush}
+      - PGPASSWORD=${PGPASSWORD:-mushpass}
+      - PGDATABASE=${PGDATABASE:-jobs}
     restart: unless-stopped
+
+volumes:
+  pg_data:

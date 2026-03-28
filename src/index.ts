@@ -7,6 +7,9 @@ export { MushConnection } from './connection';
 // Container
 export { RhostContainer, ContainerConnectionInfo } from './container';
 
+// Config
+export { loadConfig, RhostConfig, CONFIG_FILENAME } from './config';
+
 // Assertions (backward-compat)
 export { RhostAssert, RhostAssertionError, AssertionResult, isRhostError } from './assertions';
 

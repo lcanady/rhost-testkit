@@ -37,6 +37,7 @@ RUN apt-get update && apt-get install -y \
     psmisc \
     dos2unix \
     python3 \
+    python3-psycopg2 \
     lua5.4 \
     && rm -rf /var/lib/apt/lists/*
 
