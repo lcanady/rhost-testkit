@@ -43,16 +43,47 @@ docker compose down
 
 Set these in `.env` (copy from `.env.example`) or pass via `docker compose run -e`.
 
+### RhostMUSH
+
 | Variable | Default | Description |
 |---|---|---|
 | `RHOST_PORT` | `4201` | Host port mapped to the container's 4201 |
 | `RHOST_MUD_NAME` | `RhostMUSH` | Value written to `mud_name` in `netrhost.conf` on first run |
+| `RHOST_PASS` | `Nyctasia` | Wizard password set during first-run initialisation |
+| `RHOST_API_PORT` | `4202` | Host port for the HTTP API |
+| `RHOST_API_ALLOW_IP` | `127.0.0.1` | IP ACL for the HTTP API. Set to a wider range only behind a TLS reverse proxy. |
 
-These variables are only applied during **first-run initialisation**. After `persistent_data/netrhost.conf` exists, edit it directly to change settings.
+The `RHOST_*` variables are only applied during **first-run initialisation**. After `persistent_data/netrhost.conf` exists, edit it directly to change settings.
+
+### PostgreSQL
+
+The `postgres` service is included in `docker-compose.yml` for the Jobs system and any other softcode that reads/writes a relational database via `execscript()`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `PGUSER` | `mush` | PostgreSQL role created at init |
+| `PGPASSWORD` | `mushpass` | Password for `PGUSER` |
+| `PGDATABASE` | `jobs` | Default database created at init |
+
+These are automatically wired into the `rhostmush` container as `PGHOST=postgres`, `PGPORT=5432`, and the above three, so `scripts/jobs_db.py` (and any other Python execscript) can call `psycopg2.connect()` without additional configuration.
 
 ---
 
 ## Persistence
+
+### PostgreSQL data
+
+The `postgres` service uses a named Docker volume (`pg_data`) so database state survives `docker compose restart` and `docker compose stop/start`. It is **not** destroyed by `docker compose down` unless you pass `--volumes`:
+
+```bash
+# Keep pg_data (default — safe restart):
+docker compose down && docker compose up
+
+# Destroy pg_data and start fresh:
+docker compose down --volumes && docker compose up
+```
+
+### RhostMUSH flatfile
 
 Everything that should survive container restarts lives in `persistent_data/` (a bind mount at `/persistent` inside the container):
 

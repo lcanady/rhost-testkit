@@ -759,23 +759,57 @@ Wraps [testcontainers](https://node.testcontainers.org/) to spin up a real Rhost
 import { RhostContainer } from '@rhost/testkit';
 ```
 
-### `RhostContainer.fromSource(projectRoot?)`
+### `RhostContainer.fromSource(projectRoot?, config?)`
 
 Build the image from the Dockerfile on first run. Subsequent runs reuse Docker's layer cache.
 
 ```typescript
 const container = RhostContainer.fromSource();
-// Or specify the path to the rhostmush-docker directory:
+// Specify the path to the rhostmush-docker directory:
 const container = RhostContainer.fromSource('/path/to/rhostmush-docker');
+// Inject a custom scripts directory:
+const container = RhostContainer.fromSource(undefined, { scriptsDir: './scripts' });
 ```
 
-### `RhostContainer.fromImage(image?)`
+### `RhostContainer.fromImage(image?, config?)`
 
-Use a pre-built image (default: `rhostmush/rhostmush:latest`). Faster — skips the build step.
+Use a pre-built image (default: `lcanady/rhostmush:latest`). Faster — skips the build step.
 
 ```typescript
 const container = RhostContainer.fromImage();
 const container = RhostContainer.fromImage('rhostmush/rhostmush:v1.2');
+// Inject a custom mush config file:
+const container = RhostContainer.fromImage(undefined, { mushConfig: './mush.conf' });
+```
+
+### `rhost.config.json` — project-level config
+
+Place a `rhost.config.json` at your project root to configure the container without changing test code. Both factory methods auto-load it when no `config` argument is supplied.
+
+```json
+{
+  "scriptsDir": "./scripts",
+  "mushConfig": "./mush.conf"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `scriptsDir` | `string` | Path to a directory of execscript files. Copied into the container at `/home/rhost/game/scripts`, replacing the built-in scripts. Must be within the project directory. |
+| `mushConfig` | `string` | Path to a MUSH server config file. Copied into the container at `/home/rhost/game/mush.config`. Must be within the project directory. |
+
+All paths are relative to the `rhost.config.json` file's location and are validated — paths that escape the project root (e.g. `../../etc`) throw an error.
+
+```typescript
+import { loadConfig, RhostConfig } from '@rhost/testkit';
+
+// Load manually (returns null if rhost.config.json doesn't exist):
+const cfg: RhostConfig | null = loadConfig();
+
+// Or pass config programmatically (overrides auto-load):
+const container = RhostContainer.fromSource(undefined, {
+  scriptsDir: './my-scripts',
+});
 ```
 
 ### `container.start(startupTimeout?)`

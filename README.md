@@ -1231,6 +1231,7 @@ See [ROADMAP.md](./ROADMAP.md) for full details and implementation notes.
 | v1.1.0 | Server pre-flight assertions · Multi-persona test matrix · Side-effect assertion mode |
 | v1.2.0 | Register clobber analyzer · Deploy pipeline with rollback · Dialect compatibility report |
 | v1.3.0 | **Softcode formatter** (`rhost-testkit fmt`) · **Benchmark mode** (`RhostBenchmark`) |
+| v1.4.0 | **PostgreSQL sidecar** (`docker-compose.yml`) · **`execscript` Jobs bridge** (`scripts/jobs_db.py`) · **`rhost.config.json`** custom scripts dir + mush config · `softcode/` directory |
 
 ### Planned
 
