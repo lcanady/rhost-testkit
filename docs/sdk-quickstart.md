@@ -14,22 +14,30 @@ Get from zero to a passing test suite in five minutes.
 ## 1. Install
 
 ```bash
-cd sdk
-npm install
+npm install @rhost/testkit
 ```
 
 ---
 
 ## 2. Start a server
 
+### Option A — Docker (recommended for integration tests)
+
 ```bash
-# From the repo root
-docker compose up --build -d
+docker run -d -p 4201:4201 rhostmush/rhostmush
 ```
 
-The first build compiles RhostMUSH from source — allow 5-10 minutes. Subsequent starts are under 30 seconds.
+The image starts in seconds. Default credentials: **Wizard / Nyctasia**, port **4201**.
 
-Default credentials: **Wizard / Nyctasia**, port **4201**.
+### Option B — Use testcontainers (automated, no manual Docker)
+
+```typescript
+import { RhostContainer } from '@rhost/testkit';
+
+const container = RhostContainer.fromImage();
+const { host, port } = await container.start();
+// Connect your runner to { host, port }
+```
 
 ---
 
@@ -38,7 +46,7 @@ Default credentials: **Wizard / Nyctasia**, port **4201**.
 Create `my-tests.ts` anywhere:
 
 ```typescript
-import { RhostRunner } from './sdk/src';
+import { RhostRunner } from '@rhost/testkit';
 
 const runner = new RhostRunner();
 
@@ -92,16 +100,15 @@ Tests: 4 passed, 0 failed, 4 total (52ms)
 
 ---
 
-## 4. Use the built-in Jest integration
+## 4. Run the built-in test suite
 
-The SDK ships with a full Jest test suite. Run unit tests (no Docker required):
+Unit tests (no Docker required):
 
 ```bash
-cd sdk
 npm test
 ```
 
-Run integration tests against a live container:
+Integration tests against a live container:
 
 ```bash
 npm run test:integration
@@ -126,7 +133,6 @@ runner.describe('Attributes', ({ it }) => {
     const obj = await world.create('Calculator');
     await world.set(obj, 'ADD', 'think add(%0,%1)');
     const lines = await world.trigger(obj, 'ADD', '10,32');
-    // lines is a string[] of everything the trigger emitted
     console.log(lines); // ['42']
   });
 });
@@ -134,7 +140,103 @@ runner.describe('Attributes', ({ it }) => {
 
 ---
 
-## 6. Skip and focus tests
+## 6. Snapshot testing
+
+On the first run, `toMatchSnapshot()` writes the result to a `.snap` file. On subsequent runs it compares against the stored value.
+
+```typescript
+it('iter output', async ({ expect }) => {
+  await expect('iter(lnum(1,5),##)').toMatchSnapshot();
+});
+```
+
+To refresh stored snapshots:
+
+```bash
+RHOST_UPDATE_SNAPSHOTS=1 npx ts-node my-tests.ts
+```
+
+---
+
+## 7. Validate softcode offline
+
+No server needed:
+
+```bash
+# Validate an expression
+npx rhost-testkit validate "add(2,3)"
+
+# Validate a file
+npx rhost-testkit validate --file mycode.mush
+```
+
+---
+
+## 8. Watch mode
+
+Re-run tests on save:
+
+```bash
+npx rhost-testkit watch
+```
+
+---
+
+## 9. Generate CI/CD templates
+
+```bash
+# GitHub Actions
+npx rhost-testkit init --ci github
+
+# GitLab CI
+npx rhost-testkit init --ci gitlab
+```
+
+---
+
+## 10. Format softcode
+
+Strip extra whitespace around delimiters:
+
+```bash
+# Format in-place
+npx rhost-testkit fmt mycode.mush
+
+# Check without writing (exit 1 if unformatted — useful in CI)
+npx rhost-testkit fmt --check mycode.mush
+```
+
+Or from TypeScript:
+
+```typescript
+import { format } from '@rhost/testkit';
+
+const result = format('add( 2, 3 )');
+// result.formatted => 'add(2,3)'
+// result.changed   => true
+```
+
+---
+
+## 11. Benchmark softcode
+
+Measure median / p95 / p99 latency for expressions:
+
+```typescript
+import { RhostBenchmark, formatBenchResults } from '@rhost/testkit';
+
+const bench = new RhostBenchmark(client);
+bench
+  .add('add(2,3)', { name: 'simple add', iterations: 100 })
+  .add('iter(lnum(1,100),##)', { name: 'heavy iter', iterations: 50 });
+
+const results = await bench.run();
+console.log(formatBenchResults(results));
+```
+
+---
+
+## 12. Skip and focus tests
 
 ```typescript
 runner.describe('Suite', ({ it }) => {
@@ -159,4 +261,4 @@ runner.describe('Suite', ({ it }) => {
 
 - [SDK Reference](sdk-reference.md) — complete API documentation
 - [Writing Tests](writing-tests.md) — patterns for real-world softcode testing
-- [`examples/basic.ts`](../sdk/examples/basic.ts) — runnable example covering all major features
+- [`examples/basic.ts`](../examples/basic.ts) — runnable example covering all major features

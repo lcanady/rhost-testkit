@@ -6,10 +6,13 @@ import * as fs from 'fs';
 import { tokenize } from './tokenizer';
 import { parse } from './parser';
 import { semanticCheck } from './checker';
+import { registerClobberCheck } from './clobber';
+import { compatibilityCheck, CompatibilityReport, CompatibilityEntry } from './compat';
 import { Diagnostic, ValidationResult } from './types';
 
 export { ValidationResult, Diagnostic, Severity } from './types';
-export { FunctionSignature, BUILTIN_FUNCTIONS } from './builtins';
+export { FunctionSignature, BUILTIN_FUNCTIONS, Platform } from './builtins';
+export { CompatibilityReport, CompatibilityEntry } from './compat';
 
 /**
  * Validate a RhostMUSH softcode expression without a server connection.
@@ -57,11 +60,32 @@ export function validate(expr: string): ValidationResult {
   const tokens = tokenize(expr);
   const { nodes, diagnostics: structural } = parse(tokens);
   const semantic = semanticCheck(nodes);
+  const clobber = registerClobberCheck(nodes);
 
-  const all = [...structural, ...semantic];
+  const all = [...structural, ...semantic, ...clobber];
   const valid = !all.some((d) => d.severity === 'error');
 
   return { valid, diagnostics: all };
+}
+
+/**
+ * Analyse a softcode expression for cross-platform dialect compatibility.
+ *
+ * Returns a `CompatibilityReport` listing any functions that are not
+ * available on all MUSH platforms (PennMUSH, TinyMUX, RhostMUSH).
+ *
+ * @example
+ *   const report = compatibilityReport('encode64(hello)');
+ *   // report.portable === false
+ *   // report.restricted === [{ name: 'encode64', platforms: ['rhost'] }]
+ */
+export function compatibilityReport(expr: string): CompatibilityReport {
+  if (expr.trim() === '') {
+    return { restricted: [], portable: true };
+  }
+  const tokens = tokenize(expr);
+  const { nodes } = parse(tokens);
+  return compatibilityCheck(nodes);
 }
 
 /**

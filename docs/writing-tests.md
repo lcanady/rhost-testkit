@@ -7,7 +7,7 @@ Patterns and techniques for testing real MUSHcode with the SDK.
 ## Anatomy of a test file
 
 ```typescript
-import { RhostRunner } from '../sdk/src';
+import { RhostRunner } from '@rhost/testkit';
 
 const runner = new RhostRunner();
 
@@ -355,7 +355,7 @@ tests/
 
 ```typescript
 // tests/helpers.ts
-import { RhostRunner, RunnerOptions } from '../sdk/src';
+import { RhostRunner, RunnerOptions } from '@rhost/testkit';
 
 export const DEFAULT_OPTS: RunnerOptions = {
   username: 'Wizard',
@@ -386,7 +386,21 @@ runner.run(DEFAULT_OPTS).then((r) => process.exit(r.failed > 0 ? 1 : 0));
 
 ## Running in CI
 
-### GitHub Actions example
+### Generate a workflow automatically
+
+```bash
+# GitHub Actions
+npx rhost-testkit init --ci github
+
+# GitLab CI
+npx rhost-testkit init --ci gitlab
+```
+
+This writes a pre-configured workflow file to `.github/workflows/mush-tests.yml` or `.gitlab-ci.yml`. The generated file runs unit tests immediately and has an optional commented block for integration tests against the `rhostmush/rhostmush` Docker image.
+
+### Manual GitHub Actions example
+
+If you prefer to write the workflow yourself:
 
 ```yaml
 name: Softcode Tests
@@ -402,20 +416,16 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20'
 
-      - name: Install SDK deps
-        run: npm install
-        working-directory: sdk
+      - run: npm ci
 
       - name: Unit tests (no Docker)
         run: npm test
-        working-directory: sdk
 
-      - name: Integration tests (builds RhostMUSH in Docker)
+      - name: Integration tests
         run: npm run test:integration
-        working-directory: sdk
-        timeout-minutes: 30   # first build needs time
+        timeout-minutes: 30
 ```
 
 ### Environment variables in CI
@@ -431,9 +441,57 @@ Or pass them directly to `runner.run()` from environment:
 ```typescript
 runner.run({
   username: process.env.RHOST_USER ?? 'Wizard',
-  password: process.env.RHOST_PASS ?? 'Nyctasia',
+  password: process.env.RHOST_PASS,   // use a CI secret; never hardcode
   host: process.env.RHOST_HOST ?? 'localhost',
   port: Number(process.env.RHOST_PORT ?? 4201),
+});
+```
+
+---
+
+## Snapshot testing
+
+`toMatchSnapshot()` writes the result on the first run, then diffs on every subsequent run. Useful for complex output you don't want to hard-code.
+
+```typescript
+runner.describe('iter patterns', ({ it }) => {
+  it('lnum output', async ({ expect }) => {
+    await expect('iter(lnum(1,5),##)').toMatchSnapshot();
+    // First run: writes "1 2 3 4 5" to __snapshots__/<file>.snap
+    // Next runs: compares against stored value
+  });
+
+  it('nested iter', async ({ expect }) => {
+    await expect('iter(lnum(1,3),iter(lnum(1,##),##,|),|)').toMatchSnapshot();
+  });
+});
+```
+
+To update all stored snapshots after intentional output changes:
+
+```bash
+RHOST_UPDATE_SNAPSHOTS=1 npx ts-node my-tests.ts
+```
+
+Snapshot files are stored in `__snapshots__/<test-file>.snap` next to your test file. Commit them to version control.
+
+---
+
+## Previewing output with colors
+
+`client.preview()` renders raw server output (including ANSI color codes) in a framed block to stdout. Useful for visual debugging of color-coded output.
+
+```typescript
+it('see colors', async ({ client }) => {
+  // Render the softcode result with all ANSI codes intact
+  await client.preview('ansi(r,red) ansi(g,green) ansi(b,blue)');
+
+  // Preview a full command's output
+  await client.preview('look here', { mode: 'command' });
+
+  // Suppress printing and just get the raw string
+  const raw = await client.preview('ansi(b,test)', { print: false });
+  expect(raw).toContain('test');
 });
 ```
 

@@ -2,6 +2,8 @@
 // RhostMUSH built-in function signature database
 // ---------------------------------------------------------------------------
 
+export type Platform = 'rhost' | 'penn' | 'mux';
+
 export interface FunctionSignature {
   name: string;
   minArgs: number;
@@ -10,6 +12,11 @@ export interface FunctionSignature {
   deprecated?: boolean;
   /** True for functions specific to RhostMUSH (not standard PennMUSH/TinyMUX) */
   rhostOnly?: boolean;
+  /**
+   * If set, the function is only available on these platforms.
+   * Omit for functions that are universally available.
+   */
+  platforms?: Platform[];
 }
 
 // minArgs, maxArgs shorthand builder
@@ -122,16 +129,16 @@ const DEFINITIONS: [string, number, number, Partial<FunctionSignature>?][] = [
   ['secure',     1, 1],
   ['stripansi',  1, 1],
   ['ansi',       2, 2],
-  ['soundex',    1, 1,   { rhostOnly: true }],
+  ['soundex',    1, 1,   { platforms: ['rhost', 'penn'] }],
   ['soundslike', 2, 2],
-  ['strdistance',2, 2,   { rhostOnly: true }],
+  ['strdistance',2, 2,   { rhostOnly: true, platforms: ['rhost'] }],
   ['checkstr',   1, 1],
   ['strinsert',  3, 3],
   ['encrypt',    2, 2],
   ['decrypt',    2, 2],
-  ['encode64',   1, 1,   { rhostOnly: true }],
-  ['decode64',   1, 1,   { rhostOnly: true }],
-  ['digest',     2, 2,   { rhostOnly: true }],
+  ['encode64',   1, 1,   { rhostOnly: true, platforms: ['rhost'] }],
+  ['decode64',   1, 1,   { rhostOnly: true, platforms: ['rhost'] }],
+  ['digest',     2, 2,   { rhostOnly: true, platforms: ['rhost'] }],
   ['crypt',      2, 2],
   ['tr',         3, 3],
   ['flip',       0, 1],
@@ -241,7 +248,7 @@ const DEFINITIONS: [string, number, number, Partial<FunctionSignature>?][] = [
   ['when',       2, 2],
   ['null',       0, INF],
   ['nop',        0, INF],
-  ['localize',   1, 1],
+  ['localize',   1, 1,   { platforms: ['rhost', 'penn'] }],
   ['objeval',    2, 2],
   ['eval',       2, 2],
   ['apply',      2, 3],
@@ -264,7 +271,7 @@ const DEFINITIONS: [string, number, number, Partial<FunctionSignature>?][] = [
   ['setvars',    2, 2],
   ['xvars',      2, 2],
   ['lvars',      0, 1],
-  ['execscript', 1, INF, { rhostOnly: true }],
+  ['execscript', 1, INF, { rhostOnly: true, platforms: ['rhost'] }],
   ['pemit',      2, 2],
   ['emit',       1, 1],
   ['remit',      2, 2],

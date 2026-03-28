@@ -6,6 +6,8 @@
 import { runValidateCli } from './validate';
 import { runWatchCli } from './watch';
 import { runInitCli } from './init';
+import { runDeployCli } from './deploy';
+import { runFmtCli } from './fmt';
 
 const args = process.argv.slice(2);
 const cmd = args[0];
@@ -21,6 +23,14 @@ switch (cmd) {
 
   case 'init':
     runInitCli(args.slice(1));
+    break;
+
+  case 'deploy':
+    runDeployCli(args.slice(1));
+    break;
+
+  case 'fmt':
+    runFmtCli(args.slice(1));
     break;
 
   case '--version':
@@ -56,6 +66,8 @@ COMMANDS
   validate    Validate a softcode expression offline (no server needed)
   watch       Watch test files and re-run on change
   init        Generate CI/CD workflow templates
+  deploy      Deploy a softcode file with automatic rollback on failure
+  fmt         Format a softcode file (normalize whitespace)
 
 OPTIONS
   -v, --version   Print version and exit
@@ -70,5 +82,8 @@ EXAMPLES
   rhost-testkit watch src/__tests__/math.test.ts
   rhost-testkit init --ci github
   rhost-testkit init --ci gitlab
+  rhost-testkit deploy --file mycode.mush --dry-run
+  rhost-testkit fmt mycode.mush
+  rhost-testkit fmt --check mycode.mush
 `.trim());
 }

@@ -115,6 +115,12 @@ export class RhostClient {
         if (/[\n\r]/.test(password)) {
             throw new RangeError('login: invalid password — must not contain newline or carriage return characters');
         }
+        // The MUSH `connect` command is space-delimited: embedding a space or tab
+        // in the username would let the caller silently substitute a different
+        // character name and password (space-splitting injection).
+        if (/[ \t]/.test(username)) {
+            throw new RangeError('login: invalid username — must not contain spaces or tabs');
+        }
         const sentinel = `RHOST_LOGIN_${this.makeId()}`;
         this.conn.send(`connect ${username} ${password}`);
         this.conn.send(`@pemit me=${sentinel}`);

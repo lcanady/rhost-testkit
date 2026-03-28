@@ -28,12 +28,15 @@ npm install @rhost/testkit
 - [API reference — RhostClient](#api-reference--rhostclient)
 - [API reference — RhostContainer](#api-reference--rhostcontainer)
 - [Offline validator](#offline-validator)
+- [Softcode formatter](#softcode-formatter)
+- [Benchmark mode](#benchmark-mode)
 - [Watch mode](#watch-mode)
 - [CI/CD templates](#cicd-templates)
 - [MUSH output format](#mush-output-format)
 - [Using with LLM skills](#using-with-llm-skills)
 - [Environment variables](#environment-variables)
 - [Examples](#examples)
+- [Roadmap](#roadmap)
 
 ---
 
@@ -46,7 +49,9 @@ npm install @rhost/testkit
 - **Snapshot test** softcode output — first run writes, subsequent runs compare with a diff on mismatch
 - **Preview** raw server output exactly as a MUSH client sees it — ANSI colours and all
 - **Manage fixtures** — create/destroy objects, set attributes, force commands, send mail, and more
-- **Validate softcode offline** — catch syntax errors and wrong arg counts without a server
+- **Validate softcode offline** — catch syntax errors, wrong arg counts, register clobber risks, and dialect compatibility without a server
+- **Format softcode** — normalize whitespace and optionally indent nested calls (`rhost-testkit fmt`)
+- **Benchmark** expressions — measure median / p95 / p99 latency per softcode call against a live server
 - **Watch mode** — re-run tests on save with a 300ms debounce
 - **Generate CI/CD workflows** — one command to get GitHub Actions or GitLab CI configured
 - **Spin up RhostMUSH in Docker** for isolated, reproducible CI runs
@@ -561,7 +566,7 @@ Establishes the TCP connection and drains the welcome banner.
 ```typescript
 await client.login(username: string, password: string): Promise<void>
 ```
-Sends `connect <username> <password>` and waits for the login sentinel. Throws `RangeError` if either credential contains `\n` or `\r`.
+Sends `connect <username> <password>` and waits for the login sentinel. Throws `RangeError` if the username contains `\n`, `\r`, spaces, or tabs (which would split the MUSH connect command), or if the password contains `\n` or `\r`.
 
 ```typescript
 await client.eval(expression: string, timeout?: number): Promise<string>
@@ -747,6 +752,150 @@ Exit code `0` = valid (warnings allowed), `1` = one or more errors.
 | `W002` | warning | Empty argument (e.g. `add(,3)`) |
 | `W003` | warning | Deprecated function |
 | `W005` | warning | Unknown function name (may be a UDF) |
+| `W006` | warning | Register clobber risk — `setq()` inside a loop body may overwrite registers in concurrent iterations |
+
+### Dialect compatibility report
+
+Report which functions are portable across MUSH platforms (RhostMUSH, PennMUSH, TinyMUX):
+
+```typescript
+import { compatibilityReport } from '@rhost/testkit';
+
+const report = compatibilityReport('json(get,key)');
+// report.portable  => false
+// report.restricted => [{ name: 'json', platforms: ['rhost'] }]
+```
+
+```bash
+npx rhost-testkit validate --compat mycode.mush
+```
+
+### Register clobber analysis
+
+`%q0`–`%q9` registers are scoped per queue entry. The validator warns when `setq()` appears inside a loop body (`iter()`, `parse()`, `map()`, etc.) where concurrent invocations can silently overwrite each other's registers:
+
+```bash
+$ rhost-testkit validate --file combat.mush
+
+WARNING W006: register clobber risk
+  setq() writes %q0 inside iter() at offset 14.
+  Wrap in localize() to scope registers to each iteration.
+```
+
+---
+
+## Softcode formatter
+
+Normalize whitespace in softcode files — strips extra spaces around `(`, `,`, `)` while preserving interior argument text.
+
+### CLI
+
+```bash
+# Format a file in-place
+npx rhost-testkit fmt mycode.mush
+
+# Check without writing (exit 1 if not formatted — useful in CI)
+npx rhost-testkit fmt --check mycode.mush
+
+# Indent nested function calls for human readability
+npx rhost-testkit fmt --pretty mycode.mush
+
+# Normalize function names to lowercase
+npx rhost-testkit fmt --lowercase mycode.mush
+
+# Format from stdin
+echo "add( 2, 3 )" | npx rhost-testkit fmt
+```
+
+### Programmatic API
+
+```typescript
+import { format } from '@rhost/testkit';
+
+const result = format('add( 2, 3 )');
+// result.formatted => 'add(2,3)'
+// result.changed   => true
+
+// Pretty mode — indents nested calls for readability (not for upload)
+const pretty = format('add(mul(2,3),4)', { pretty: true });
+// pretty.formatted => 'add(\n  mul(2,3),\n  4\n)'
+
+// Lowercase function names
+const lower = format('ADD(2,3)', { lowercase: true });
+// lower.formatted => 'add(2,3)'
+```
+
+Interior whitespace within argument text is preserved — `pemit(%#,hello world)` is not changed.
+
+---
+
+## Benchmark mode
+
+Profile softcode performance against a live server. Reports median, p95, and p99 latency per expression.
+
+### Programmatic API
+
+```typescript
+import { RhostBenchmark, formatBenchResults } from '@rhost/testkit';
+
+const bench = new RhostBenchmark(client);
+
+bench
+  .add('add(2,3)', { name: 'addition', iterations: 100, warmup: 10 })
+  .add('iter(lnum(1,100),##)', { name: 'heavy iter', iterations: 50, warmup: 5 });
+
+const results = await bench.run();
+console.log(formatBenchResults(results));
+```
+
+Output:
+
+```
+Benchmark Results
+────────────────────────────────────────────────────────────────────────
+  addition
+  iterations: 100  warmup: 10
+  median: 4.231ms  mean: 4.512ms  p95: 7.820ms  p99: 12.003ms
+  min: 3.901ms  max: 14.221ms
+
+  heavy iter
+  iterations: 50  warmup: 5
+  median: 18.440ms  mean: 19.201ms  p95: 31.100ms  p99: 38.500ms
+  min: 16.002ms  max: 41.300ms
+────────────────────────────────────────────────────────────────────────
+```
+
+### `runBench` — single expression
+
+```typescript
+import { runBench } from '@rhost/testkit';
+
+const result = await runBench(client, 'iter(lnum(1,1000),##)', {
+  name: 'heavy iter',
+  iterations: 100,
+  warmup: 10,
+});
+
+console.log(`median: ${result.median.toFixed(2)}ms`);
+console.log(`p95: ${result.p95.toFixed(2)}ms`);
+```
+
+### `BenchmarkResult` shape
+
+```typescript
+interface BenchmarkResult {
+  name:       string;
+  iterations: number;
+  warmup:     number;
+  samples:    number[];   // raw timings in ms, in run order
+  mean:       number;
+  median:     number;
+  p95:        number;
+  p99:        number;
+  min:        number;
+  max:        number;
+}
+```
 
 ---
 
@@ -1066,6 +1215,32 @@ npm run example:01
 | `08-execscript.ts` | Call shell/Python scripts from softcode via execscript() |
 | `09-api.ts` | HTTP API: eval softcode over HTTP with Basic Auth |
 | `10-lua.ts` | Embedded Lua via HTTP API |
+
+---
+
+## Roadmap
+
+See [ROADMAP.md](./ROADMAP.md) for full details and implementation notes.
+
+### ✅ Shipped
+
+| Version | Features |
+|---------|----------|
+| v0.2.0 | Offline validator · Watch mode · Snapshot testing |
+| v1.0.0 | Extended world API · CI/CD templates |
+| v1.1.0 | Server pre-flight assertions · Multi-persona test matrix · Side-effect assertion mode |
+| v1.2.0 | Register clobber analyzer · Deploy pipeline with rollback · Dialect compatibility report |
+| v1.3.0 | **Softcode formatter** (`rhost-testkit fmt`) · **Benchmark mode** (`RhostBenchmark`) |
+
+### Planned
+
+**Test coverage tracking** — report which attributes on which objects were exercised during a run.
+
+**Interactive REPL** — persistent connection with readline history and tab-complete for built-in functions.
+
+**Parallel test execution** — run independent `describe` blocks concurrently on separate connections.
+
+**Recursion depth profiler** — track max call depth per expression, warn before hitting server recursion limits.
 
 ---
 

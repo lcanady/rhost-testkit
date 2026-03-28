@@ -1,5 +1,95 @@
 import { RhostClient } from './client';
 
+// ---------------------------------------------------------------------------
+// WorldSnapshot types
+// ---------------------------------------------------------------------------
+
+export interface WorldObjectDiff {
+    dbref: string;
+    added: string[];
+    removed: string[];
+}
+
+export interface WorldDiff {
+    clean: boolean;
+    created: string[];
+    destroyed: string[];
+    modified: WorldObjectDiff[];
+}
+
+export class WorldSideEffectError extends Error {
+    constructor(public readonly diff: WorldDiff, message: string) {
+        super(message);
+        this.name = 'WorldSideEffectError';
+    }
+}
+
+interface ObjectSnapshot {
+    attrs: string[];
+}
+
+export class WorldSnapshot {
+    /** Internal state map, exposed for test inspection as _state. */
+    readonly _state: Record<string, ObjectSnapshot>;
+    private readonly trackedDbrefsCopy: string[];
+
+    constructor(
+        private readonly world: RhostWorld,
+        state: Record<string, ObjectSnapshot>,
+        trackedDbrefsCopy: string[],
+    ) {
+        this._state = state;
+        this.trackedDbrefsCopy = trackedDbrefsCopy;
+    }
+
+    /** Compare current world state against this snapshot and return a diff. */
+    async diff(): Promise<WorldDiff> {
+        const currentDbrefs: string[] = [...(this.world as any).dbrefs];
+        const beforeSet = new Set(this.trackedDbrefsCopy);
+        const afterSet = new Set(currentDbrefs);
+
+        const created = currentDbrefs.filter((d) => !beforeSet.has(d));
+        const destroyed = this.trackedDbrefsCopy.filter((d) => !afterSet.has(d));
+        const modified: WorldObjectDiff[] = [];
+
+        // Check objects present in both before and after
+        for (const dbref of this.trackedDbrefsCopy) {
+            if (!afterSet.has(dbref)) continue;
+            const beforeAttrs = new Set(this._state[dbref]?.attrs ?? []);
+            const currentAttrsStr = await (this.world as any).client.eval(`lattr(${dbref})`);
+            const currentAttrs = currentAttrsStr
+                ? (currentAttrsStr as string).split(' ').filter(Boolean)
+                : [];
+            const afterAttrs = new Set(currentAttrs);
+
+            const added = currentAttrs.filter((a: string) => !beforeAttrs.has(a));
+            const removed = [...beforeAttrs].filter((a) => !afterAttrs.has(a));
+
+            if (added.length > 0 || removed.length > 0) {
+                modified.push({ dbref, added, removed });
+            }
+        }
+
+        const clean = created.length === 0 && destroyed.length === 0 && modified.length === 0;
+        return { clean, created, destroyed, modified };
+    }
+
+    /** Throw a WorldSideEffectError if anything has changed since the snapshot. */
+    async assertNoChanges(): Promise<void> {
+        const d = await this.diff();
+        if (d.clean) return;
+
+        const lines: string[] = ['World state changed after snapshot (unexpected side effects):'];
+        if (d.created.length > 0) lines.push(`  Created: ${d.created.join(', ')}`);
+        if (d.destroyed.length > 0) lines.push(`  Destroyed: ${d.destroyed.join(', ')}`);
+        for (const mod of d.modified) {
+            if (mod.added.length > 0) lines.push(`  ${mod.dbref} — added attrs: ${mod.added.join(', ')}`);
+            if (mod.removed.length > 0) lines.push(`  ${mod.dbref} — removed attrs: ${mod.removed.join(', ')}`);
+        }
+        throw new WorldSideEffectError(d, lines.join('\n'));
+    }
+}
+
 /**
  * RhostWorld — fixture manager for creating and cleaning up in-game objects
  * during test runs.
@@ -207,6 +297,25 @@ export class RhostWorld {
             ? `@trigger ${dbref}/${attr}=${args}`
             : `@trigger ${dbref}/${attr}`;
         return this.client.command(cmd);
+    }
+
+    /**
+     * Capture the current state of all tracked objects.
+     * Use the returned `WorldSnapshot` to assert no side effects occurred.
+     *
+     * @example
+     *   const snap = await world.snapshot();
+     *   await client.eval('some_expression_with_possible_side_effects()');
+     *   await snap.assertNoChanges();
+     */
+    async snapshot(): Promise<WorldSnapshot> {
+        const state: Record<string, ObjectSnapshot> = {};
+        for (const dbref of this.dbrefs) {
+            const attrsStr = await this.client.eval(`lattr(${dbref})`);
+            const attrs = attrsStr ? attrsStr.split(' ').filter(Boolean) : [];
+            state[dbref] = { attrs };
+        }
+        return new WorldSnapshot(this, state, [...this.dbrefs]);
     }
 
     /**

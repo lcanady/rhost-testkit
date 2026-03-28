@@ -45,9 +45,11 @@ export interface TestContext {
 
 export type TestFn = (ctx: TestContext) => Promise<void> | void;
 export type HookFn = (ctx: { client: RhostClient; world: RhostWorld }) => Promise<void> | void;
+export type PersonaTestFn = (ctx: TestContext & { persona: string }) => Promise<void> | void;
 
 export type ItFn = (name: string, fn: TestFn, timeout?: number) => void;
 export type DescribeFn = (name: string, fn: (ctx: SuiteContext) => void) => void;
+export type PersonasFn = (names: string[], testName: string, fn: PersonaTestFn, timeout?: number) => void;
 
 export interface SuiteContext {
     it: ItFn & { skip: ItFn; only: ItFn };
@@ -57,6 +59,29 @@ export interface SuiteContext {
     afterAll(fn: HookFn): void;
     beforeEach(fn: HookFn): void;
     afterEach(fn: HookFn): void;
+    /**
+     * Register one test per persona. Each test connects to the MUSH server
+     * using the credentials defined under `runner.run({ personas: {...} })`.
+     *
+     * @example
+     *   personas(
+     *     ['mortal', 'builder', 'wizard'],
+     *     'hidden room visibility',
+     *     async ({ expect, persona }) => {
+     *       if (persona === 'mortal') {
+     *         await expect('can_see_hidden()').toBe('0');
+     *       } else {
+     *         await expect('can_see_hidden()').toBe('1');
+     *       }
+     *     },
+     *   );
+     */
+    personas: PersonasFn;
+}
+
+export interface PersonaCredentials {
+    username: string;
+    password: string;
 }
 
 export interface RunnerOptions extends RhostClientOptions {
@@ -66,6 +91,20 @@ export interface RunnerOptions extends RhostClientOptions {
     password: string;
     /** Print results to stdout while running. Default: true */
     verbose?: boolean;
+    /**
+     * Credentials for named personas used by `personas()` tests.
+     *
+     * @example
+     *   runner.run({
+     *     username: 'Wizard',
+     *     password: 'Nyctasia',
+     *     personas: {
+     *       mortal:  { username: 'TestMortal',  password: 'mortalpass' },
+     *       builder: { username: 'TestBuilder', password: 'builderpass' },
+     *     },
+     *   });
+     */
+    personas?: Record<string, PersonaCredentials>;
     /**
      * Absolute or relative path to the snapshot file.
      * Default: `__snapshots__/<calling-file>.snap` next to the test file,
@@ -130,6 +169,8 @@ interface SuiteNode {
  */
 export class RhostRunner {
     private topLevel: Array<SuiteNode | TestNode> = [];
+    /** Set at the start of run() so persona test closures can access credentials. */
+    private _options: RunnerOptions | undefined;
 
     // -------------------------------------------------------------------------
     // Collection-phase API
@@ -145,6 +186,7 @@ export class RhostRunner {
     // -------------------------------------------------------------------------
 
     async run(options: RunnerOptions): Promise<RunResult> {
+        this._options = options;
         const verbose = options.verbose !== false;
         const updateMode =
             options.updateSnapshots === true ||
@@ -213,6 +255,38 @@ export class RhostRunner {
         describeFn.skip = makeDescribeFn('skip');
         describeFn.only = makeDescribeFn('only');
 
+        const personasFn: PersonasFn = (names, testName, personaFn, timeout?) => {
+            for (const personaName of names) {
+                const wrappedFn: TestFn = async (ctx) => {
+                    const opts = this._options;
+                    const creds = opts?.personas?.[personaName];
+                    if (!creds) {
+                        throw new Error(
+                            `personas(): persona '${personaName}' not defined — ` +
+                            `add it to runner.run({ personas: { ${personaName}: { username, password } } })`
+                        );
+                    }
+                    const personaClient = new RhostClient({ ...opts, ...creds });
+                    await personaClient.connect();
+                    await personaClient.login(creds.username, creds.password);
+                    const personaWorld = new RhostWorld(personaClient);
+                    try {
+                        await personaFn({ ...ctx, client: personaClient, world: personaWorld, persona: personaName });
+                    } finally {
+                        try { await personaWorld.cleanup(); } catch { /* ignore */ }
+                        await personaClient.disconnect();
+                    }
+                };
+                node.children.push({
+                    kind: 'test',
+                    name: `${testName} [${personaName}]`,
+                    fn: wrappedFn,
+                    mode: 'normal',
+                    timeout,
+                });
+            }
+        };
+
         fn({
             it: itFn,
             test: itFn,
@@ -221,6 +295,7 @@ export class RhostRunner {
             afterAll:  (h) => node.afterAll.push(h),
             beforeEach: (h) => node.beforeEach.push(h),
             afterEach:  (h) => node.afterEach.push(h),
+            personas: personasFn,
         });
 
         return node;
