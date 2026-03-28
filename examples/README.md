@@ -39,6 +39,13 @@ npm run examples
 | [`08-execscript.ts`](08-execscript.ts) | **execscript**: call shell/Python scripts from softcode — arg passing, env vars, JSON, user context |
 | [`09-api.ts`](09-api.ts) | **HTTP API layer**: evaluate softcode and run commands over HTTP with Basic Auth and `Exec:` header |
 | [`10-lua.ts`](10-lua.ts) | **Embedded Lua via HTTP API**: set `API_LUA` totem → `Exec:` header runs Lua; `rhost.strfunc()`, `rhost.get()`, pattern matching, multi-statement scripts, 5 ms alarm |
+| [`11-preflight.ts`](11-preflight.ts) | **Pre-flight assertions**: `preflight()`, `assertFunctionExists()`, `assertFunctionMissing()`, `assertConfigEquals()`, non-throwing mode |
+| [`12-personas.ts`](12-personas.ts) | **Multi-persona test matrix**: `personas()` in SuiteContext — run the same test as mortal, builder, and wizard, with per-persona credential config |
+| [`13-side-effects.ts`](13-side-effects.ts) | **World snapshots / side-effect detection**: `world.snapshot()`, `snap.assertNoChanges()`, `snap.diff()` — catch attribute adds, removes, and flag changes |
+| [`14-validator-advanced.ts`](14-validator-advanced.ts) | **Offline validator** — register clobber detection (W006), dialect compatibility report (`compatibilityReport()`); no server required |
+| [`15-deploy.ts`](15-deploy.ts) | **Deploy pipeline with rollback**: `parseDeployFile()`, `deploy()` with test callback, automatic rollback on failure; `--dry-run` mode needs no server |
+| [`16-formatter.ts`](16-formatter.ts) | **Softcode formatter** (offline): compact mode, pretty-print with indentation, lowercase normalization, `changed` flag for CI lint |
+| [`17-benchmark.ts`](17-benchmark.ts) | **Benchmark mode**: `runBench()` for single expressions, `RhostBenchmark` multi-suite builder, `formatBenchResults()`, raw sample analysis |
 
 ---
 
@@ -119,6 +126,34 @@ Available C-to-MUSH bridges inside Lua:
 @totem me=API_LUA          ← switch Exec: evaluation to Lua mode
 @power me=execscript       ← allow execscript() calls from softcode
 ```
+
+---
+
+## Offline examples (14, 16)
+
+These examples require no server connection and run instantly:
+
+```bash
+npm run example:14   # validator: register clobber + dialect compat
+npm run example:16   # softcode formatter
+
+# or both at once:
+npm run examples:offline
+```
+
+---
+
+## v1.3.0 features (examples 11–17)
+
+| Example | Requires server? |
+|---|---|
+| `11-preflight.ts` | Yes |
+| `12-personas.ts` | Yes |
+| `13-side-effects.ts` | Yes |
+| `14-validator-advanced.ts` | **No** |
+| `15-deploy.ts` | `--dry-run`: No / live: Yes |
+| `16-formatter.ts` | **No** |
+| `17-benchmark.ts` | Yes |
 
 ---
 

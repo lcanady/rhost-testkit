@@ -49,7 +49,15 @@
     "example:08": "npx ts-node examples/08-execscript.ts",
     "example:09": "npx ts-node examples/09-api.ts",
     "example:10": "npx ts-node examples/10-lua.ts",
+    "example:11": "npx ts-node examples/11-preflight.ts",
+    "example:12": "npx ts-node examples/12-personas.ts",
+    "example:13": "npx ts-node examples/13-side-effects.ts",
+    "example:14": "npx ts-node examples/14-validator-advanced.ts",
+    "example:15": "npx ts-node examples/15-deploy.ts",
+    "example:16": "npx ts-node examples/16-formatter.ts",
+    "example:17": "npx ts-node examples/17-benchmark.ts",
     "examples": "npx ts-node examples/01-functions.ts && npx ts-node examples/02-rhost-specific.ts && npx ts-node examples/03-attributes.ts && npx ts-node examples/04-triggers.ts && npx ts-node examples/05-runner-features.ts && npx ts-node examples/06-game-system.ts",
+    "examples:offline": "npx ts-node examples/14-validator-advanced.ts && npx ts-node examples/16-formatter.ts",
     "examples:power": "npx ts-node examples/08-execscript.ts && npx ts-node examples/09-api.ts && npx ts-node examples/10-lua.ts"
   },
   "keywords": [
