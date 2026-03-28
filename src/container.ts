@@ -40,7 +40,7 @@ export class RhostContainer {
      * Build it first with: `docker build -t rhostmush:latest .`
      * (run from the rhostmush-docker repo root)
      */
-    static fromImage(image = 'rhostmush:latest'): RhostContainer {
+    static fromImage(image = 'lcanady/rhostmush:latest'): RhostContainer {
         return new RhostContainer(async () => new GenericContainer(image));
     }
 
