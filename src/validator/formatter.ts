@@ -76,10 +76,18 @@ class Serializer {
     if (pretty && hasNestedCall(trimmedArgs)) {
       const indent = '  '.repeat(depth + 1);
       const closingIndent = '  '.repeat(depth);
-      const serializedArgs = trimmedArgs.map(arg =>
-        indent + this.serializeNodes(arg, depth + 1)
-      );
-      return `${name}(\n${serializedArgs.join(',\n')}\n${closingIndent})`;
+      const serializedArgs = trimmedArgs.map(arg => this.serializeNodes(arg, depth + 1));
+      let body = '';
+      for (let i = 0; i < serializedArgs.length; i++) {
+        const s = serializedArgs[i];
+        const isLast = i === serializedArgs.length - 1;
+        if (s === '') {
+          body += ',';
+        } else {
+          body += `\n${indent}${s}` + (isLast ? '' : ',');
+        }
+      }
+      return `${name}(${body}\n${closingIndent})`;
     }
 
     const serializedArgs = trimmedArgs.map(arg => this.serializeNodes(arg, depth + 1));

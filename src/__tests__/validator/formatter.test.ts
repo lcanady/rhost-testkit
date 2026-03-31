@@ -154,6 +154,11 @@ describe('format — pretty mode', () => {
     const result = format('add( 2, 3 )', { pretty: true });
     expect(result.formatted).toBe('add(2,3)');
   });
+
+  it('keeps empty args (,,) on the same line as the preceding arg', () => {
+    const result = format('switch(1,hasflag(x,DARK),,result)', { pretty: true });
+    expect(result.formatted).toBe('switch(\n  1,\n  hasflag(x,DARK),,\n  result\n)');
+  });
 });
 
 // ---------------------------------------------------------------------------
