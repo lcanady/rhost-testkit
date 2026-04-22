@@ -8,6 +8,8 @@ import { runWatchCli } from './watch';
 import { runInitCli } from './init';
 import { runDeployCli } from './deploy';
 import { runFmtCli } from './fmt';
+import { runMushFormatCli } from './mush-format';
+import { runLintCli } from './lint';
 
 const args = process.argv.slice(2);
 const cmd = args[0];
@@ -31,6 +33,14 @@ switch (cmd) {
 
   case 'fmt':
     runFmtCli(args.slice(1));
+    break;
+
+  case 'mush-format':
+    runMushFormatCli(args.slice(1));
+    break;
+
+  case 'lint':
+    runLintCli(args.slice(1));
     break;
 
   case '--version':
@@ -65,9 +75,11 @@ USAGE
 COMMANDS
   validate    Validate a softcode expression offline (no server needed)
   watch       Watch test files and re-run on change
-  init        Generate CI/CD workflow templates
+  init        Scaffold project structure and optional CI/CD templates
   deploy      Deploy a softcode file with automatic rollback on failure
-  fmt         Format a softcode file (normalize whitespace)
+  fmt         Format a softcode expression (normalize whitespace)
+  mush-format Two-way converter: expand installer→src or compress src→installer
+  lint        Static analysis: bare input, missing locks, dead attrs, length budgets
 
 OPTIONS
   -v, --version   Print version and exit
@@ -80,8 +92,9 @@ EXAMPLES
   rhost-testkit validate --file mycode.mush
   rhost-testkit watch
   rhost-testkit watch src/__tests__/math.test.ts
-  rhost-testkit init --ci github
-  rhost-testkit init --ci gitlab
+  rhost-testkit init
+  rhost-testkit init my-project
+  rhost-testkit init . --ci github
   rhost-testkit deploy --file mycode.mush --dry-run
   rhost-testkit fmt mycode.mush
   rhost-testkit fmt --check mycode.mush

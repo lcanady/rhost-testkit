@@ -6,8 +6,43 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // ---------------------------------------------------------------------------
-// Templates
+// Scaffold templates
 // ---------------------------------------------------------------------------
+
+const EXAMPLE_MUSH = `\
+@@ ============================================================================
+@@ Mushcode Installer for: Example
+@@ Version: 1.0.0
+@@ Requires: None
+@@ ============================================================================
+
+&CMD_HELLO me=$+hello:@pemit %#=Hello, [name(%#)]!
+&HELP_HELLO me=Usage: +hello — greet yourself
+
+@@ ---[ UNINSTALL ]-----------------------------------------------------------
+&CMD_HELLO me=
+&HELP_HELLO me=
+@@ [END OF FILE]
+`;
+
+const EXAMPLE_TEST = `\
+import { RhostRunner } from '@rhost/testkit';
+
+const runner = new RhostRunner();
+
+runner.describe('Example', ({ it }) => {
+  it('add works', async ({ expect }) => {
+    await expect('add(2,3)').toBe('5');
+  });
+});
+
+runner.run({
+  host: process.env.RHOST_HOST ?? 'localhost',
+  port: Number(process.env.RHOST_PORT ?? 4201),
+  username: process.env.RHOST_USER ?? '#1',
+  password: process.env.RHOST_PASS ?? 'potrzebie',
+});
+`;
 
 const GITHUB_WORKFLOW = `\
 name: MUSH Tests
@@ -93,6 +128,7 @@ mush-tests:
 // ---------------------------------------------------------------------------
 
 export function runInitCli(args: string[], cwd: string = process.cwd()): void {
+    let dir: string | null = null;
     let ci: string | null = null;
     let force = false;
 
@@ -111,25 +147,79 @@ export function runInitCli(args: string[], cwd: string = process.cwd()): void {
             printHelp();
             process.exit(0);
         } else if (!arg.startsWith('-')) {
-            die(`Unexpected argument: ${arg}`);
+            if (dir !== null) {
+                die(`Unexpected argument: ${arg}`);
+            }
+            dir = arg;
         } else {
             die(`Unknown option: ${arg}`);
         }
     }
 
-    if (!ci) {
-        console.error("rhost-testkit init: --ci <platform> is required\n");
-        printHelp();
-        process.exit(1);
+    const targetDir = path.resolve(cwd, dir ?? '.');
+
+    // Create the target directory if it doesn't exist
+    if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+        console.log(`rhost-testkit init: created ${targetDir}`);
     }
 
+    // Scaffold project structure
+    scaffoldProject(targetDir, force);
+
+    // Optionally write CI workflow
+    if (ci) {
+        scaffoldCi(targetDir, ci, force);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Scaffold helpers
+// ---------------------------------------------------------------------------
+
+function scaffoldProject(targetDir: string, force: boolean): void {
+    const dirs = [
+        path.join(targetDir, 'softcode'),
+        path.join(targetDir, 'src', '__tests__'),
+        path.join(targetDir, 'dist'),
+    ];
+
+    for (const d of dirs) {
+        if (!fs.existsSync(d)) {
+            fs.mkdirSync(d, { recursive: true });
+            console.log(`rhost-testkit init: created ${d}`);
+        }
+    }
+
+    const files: Array<{ file: string; content: string }> = [
+        {
+            file: path.join(targetDir, 'softcode', 'example.mush'),
+            content: EXAMPLE_MUSH,
+        },
+        {
+            file: path.join(targetDir, 'src', '__tests__', 'example.test.ts'),
+            content: EXAMPLE_TEST,
+        },
+    ];
+
+    for (const { file, content } of files) {
+        if (fs.existsSync(file) && !force) {
+            console.log(`rhost-testkit init: ${file} already exists (use --force to overwrite)`);
+            continue;
+        }
+        fs.writeFileSync(file, content, 'utf8');
+        console.log(`rhost-testkit init: wrote ${file}`);
+    }
+}
+
+function scaffoldCi(targetDir: string, ci: string, force: boolean): void {
     const targets: Record<string, { file: string; content: string }> = {
         github: {
-            file: path.join(cwd, '.github', 'workflows', 'mush-tests.yml'),
+            file: path.join(targetDir, '.github', 'workflows', 'mush-tests.yml'),
             content: GITHUB_WORKFLOW,
         },
         gitlab: {
-            file: path.join(cwd, '.gitlab-ci.yml'),
+            file: path.join(targetDir, '.gitlab-ci.yml'),
             content: GITLAB_CI,
         },
     };
@@ -140,8 +230,8 @@ export function runInitCli(args: string[], cwd: string = process.cwd()): void {
     }
 
     if (fs.existsSync(target.file) && !force) {
-        console.warn(`rhost-testkit init: ${target.file} already exists. Use --force to overwrite.`);
-        process.exit(0);
+        console.log(`rhost-testkit init: ${target.file} already exists (use --force to overwrite)`);
+        return;
     }
 
     const dir = path.dirname(target.file);
@@ -160,20 +250,28 @@ export function runInitCli(args: string[], cwd: string = process.cwd()): void {
 function printHelp(): void {
     console.log(`
 USAGE
-  rhost-testkit init --ci <platform>
+  rhost-testkit init [dir] [--ci <platform>] [--force]
 
-PLATFORMS
-  github    Generate .github/workflows/mush-tests.yml
-  gitlab    Generate .gitlab-ci.yml
+ARGUMENTS
+  dir       Directory to initialise (default: current directory)
+            Created automatically if it does not exist.
 
 OPTIONS
-  --force   Overwrite an existing file
-  -h, --help  Show this help
+  --ci <platform>  Also generate a CI/CD workflow file
+                   Platforms: github, gitlab
+  --force          Overwrite existing files
+  -h, --help       Show this help
+
+SCAFFOLD
+  softcode/example.mush           Starter installer file
+  src/__tests__/example.test.ts   Starter RhostRunner test
+  dist/                           Output directory (empty)
 
 EXAMPLES
-  rhost-testkit init --ci github
-  rhost-testkit init --ci gitlab
-  rhost-testkit init --ci github --force
+  rhost-testkit init
+  rhost-testkit init my-project
+  rhost-testkit init . --ci github
+  rhost-testkit init my-project --ci gitlab --force
 `.trim());
 }
 

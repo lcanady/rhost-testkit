@@ -25,6 +25,96 @@ function mockExit() {
 }
 
 // ---------------------------------------------------------------------------
+// Project scaffolding (no --ci required)
+// ---------------------------------------------------------------------------
+
+describe('rhost-testkit init — project scaffold', () => {
+    it('creates softcode/ directory', () => {
+        runInitCli([], tmpDir);
+        expect(fs.existsSync(path.join(tmpDir, 'softcode'))).toBe(true);
+    });
+
+    it('creates src/__tests__/ directory', () => {
+        runInitCli([], tmpDir);
+        expect(fs.existsSync(path.join(tmpDir, 'src', '__tests__'))).toBe(true);
+    });
+
+    it('creates dist/ directory', () => {
+        runInitCli([], tmpDir);
+        expect(fs.existsSync(path.join(tmpDir, 'dist'))).toBe(true);
+    });
+
+    it('writes softcode/example.mush', () => {
+        runInitCli([], tmpDir);
+        const file = path.join(tmpDir, 'softcode', 'example.mush');
+        expect(fs.existsSync(file)).toBe(true);
+    });
+
+    it('example.mush contains installer header', () => {
+        runInitCli([], tmpDir);
+        const content = fs.readFileSync(path.join(tmpDir, 'softcode', 'example.mush'), 'utf8');
+        expect(content).toContain('@@ Mushcode Installer for:');
+    });
+
+    it('writes src/__tests__/example.test.ts', () => {
+        runInitCli([], tmpDir);
+        const file = path.join(tmpDir, 'src', '__tests__', 'example.test.ts');
+        expect(fs.existsSync(file)).toBe(true);
+    });
+
+    it('example.test.ts imports RhostRunner', () => {
+        runInitCli([], tmpDir);
+        const content = fs.readFileSync(
+            path.join(tmpDir, 'src', '__tests__', 'example.test.ts'), 'utf8'
+        );
+        expect(content).toContain('RhostRunner');
+    });
+
+    it('does not overwrite existing starter files without --force', () => {
+        const file = path.join(tmpDir, 'softcode', 'example.mush');
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, 'SENTINEL', 'utf8');
+
+        runInitCli([], tmpDir);
+
+        expect(fs.readFileSync(file, 'utf8')).toBe('SENTINEL');
+    });
+
+    it('overwrites existing starter files with --force', () => {
+        const file = path.join(tmpDir, 'softcode', 'example.mush');
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, 'SENTINEL', 'utf8');
+
+        runInitCli(['--force'], tmpDir);
+
+        expect(fs.readFileSync(file, 'utf8')).not.toBe('SENTINEL');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [dir] positional argument
+// ---------------------------------------------------------------------------
+
+describe('rhost-testkit init [dir]', () => {
+    it('scaffolds into a named subdirectory', () => {
+        runInitCli(['my-project'], tmpDir);
+        expect(fs.existsSync(path.join(tmpDir, 'my-project', 'softcode'))).toBe(true);
+    });
+
+    it('creates the named directory if it does not exist', () => {
+        const newDir = path.join(tmpDir, 'brand-new');
+        expect(fs.existsSync(newDir)).toBe(false);
+        runInitCli(['brand-new'], tmpDir);
+        expect(fs.existsSync(newDir)).toBe(true);
+    });
+
+    it('"." targets the cwd itself', () => {
+        runInitCli(['.'], tmpDir);
+        expect(fs.existsSync(path.join(tmpDir, 'softcode'))).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // GitHub workflow
 // ---------------------------------------------------------------------------
 
@@ -102,26 +192,18 @@ describe('rhost-testkit init --ci gitlab', () => {
 });
 
 // ---------------------------------------------------------------------------
-// --force behavior
+// --force behavior for CI files
 // ---------------------------------------------------------------------------
 
-describe('rhost-testkit init --force', () => {
-    it('warns and does not overwrite when file exists and --force is absent', () => {
+describe('rhost-testkit init --force (CI files)', () => {
+    it('does not overwrite when file exists and --force is absent', () => {
         runInitCli(['--ci', 'github'], tmpDir);
         const outPath = path.join(tmpDir, '.github', 'workflows', 'mush-tests.yml');
         fs.writeFileSync(outPath, 'SENTINEL_CONTENT', 'utf8');
 
-        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-        const exitSpy = mockExit();
+        runInitCli(['--ci', 'github'], tmpDir);
 
-        try {
-            expect(() => runInitCli(['--ci', 'github'], tmpDir)).toThrow('process.exit(0)');
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/already exists/i));
-            expect(fs.readFileSync(outPath, 'utf8')).toBe('SENTINEL_CONTENT');
-        } finally {
-            warnSpy.mockRestore();
-            exitSpy.mockRestore();
-        }
+        expect(fs.readFileSync(outPath, 'utf8')).toBe('SENTINEL_CONTENT');
     });
 
     it('overwrites existing file when --force is present', () => {
@@ -146,15 +228,6 @@ describe('rhost-testkit init — error cases', () => {
         const exitSpy = mockExit();
         try {
             expect(() => runInitCli(['--ci', 'bitbucket'], tmpDir)).toThrow('process.exit(1)');
-        } finally {
-            exitSpy.mockRestore();
-        }
-    });
-
-    it('exits 1 when --ci flag is missing', () => {
-        const exitSpy = mockExit();
-        try {
-            expect(() => runInitCli([], tmpDir)).toThrow('process.exit(1)');
         } finally {
             exitSpy.mockRestore();
         }

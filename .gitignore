@@ -6,5 +6,20 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Docker runtime volumes (created when containers run)
+persistent_data/
+initdb/
+
+# Python bytecache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Generated grammar artefacts
+src/validator/mux-grammar.js
+src/validator/mux-grammar.d.ts
+
 # Integration test snapshots regenerate on each live run — don't commit them
 src/__tests__/integration/__snapshots__/
