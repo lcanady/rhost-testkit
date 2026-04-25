@@ -1,4 +1,4 @@
-import { RunResult } from './runner';
+import type { RunResult } from './runner';
 import { SnapshotStats } from './snapshots';
 
 // ---------------------------------------------------------------------------
@@ -54,14 +54,33 @@ export class Reporter {
         process.stdout.write(`${indent}${yellow('○')} ${gray(name)}\n`);
     }
 
+    testOfflineSkip(name: string, depth: number, behavioralSkips: number): void {
+        if (!this.verbose) return;
+        const indent = '  '.repeat(depth + 1);
+        const skipped = behavioralSkips > 0 ? gray(` (${behavioralSkips} behavioral skipped)`) : '';
+        process.stdout.write(`${indent}${cyan('⊘')} ${name}${skipped}\n`);
+    }
+
+    offlineBanner(reason?: string): void {
+        if (!this.verbose) return;
+        const msg = reason ? ` — ${reason}` : '';
+        process.stdout.write(`\n${cyan('⚡')} ${bold('Offline mode')}${gray(msg)}\n`);
+        process.stdout.write(`${gray('   Syntax and lint checks run. Behavioral assertions skipped.')}\n`);
+    }
+
     summary(result: RunResult): void {
         if (!this.verbose) return;
         const parts: string[] = [];
         if (result.passed > 0)  parts.push(green(`${result.passed} passed`));
         if (result.failed > 0)  parts.push(red(`${result.failed} failed`));
         if (result.skipped > 0) parts.push(yellow(`${result.skipped} skipped`));
+        if (result.offlineSkipped > 0) parts.push(cyan(`${result.offlineSkipped} syntax-checked`));
         parts.push(`${result.total} total`);
         process.stdout.write(`\nTests:     ${parts.join(', ')} ${gray(`(${result.duration}ms)`)}\n`);
+        if (result.mode === 'offline') {
+            const skipped = result.behavioralSkipped ?? 0;
+            process.stdout.write(`${cyan('⚡')} ${gray(`Offline — ${skipped} behavioral assertion${skipped !== 1 ? 's' : ''} skipped (needs server)`)}\n`);
+        }
         this.snapshotSummary(result.snapshots);
     }
 

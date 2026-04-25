@@ -1,5 +1,5 @@
 // Core client
-export { RhostClient, RhostClientOptions, PreviewOptions, stripAnsi } from './client';
+export { RhostClient, RhostClientOptions, CommandOptions, PreviewOptions, stripAnsi } from './client';
 
 // Connection
 export { MushConnection } from './connection';
@@ -89,3 +89,23 @@ export { SnapshotManager, SnapshotStats, SnapshotStatus, SnapshotCheckResult, fo
 
 // Watch mode
 export { RhostWatcher, WatchOptions, discoverTestFiles } from './watcher';
+
+// Offline static analysis — no server required
+export {
+  parseDocument,
+  parseDocumentFile,
+  loadFiles,
+  loadGlob,
+  OfflineRunner,
+  OfflineExpect,
+  OfflineExpectError,
+} from './offline';
+export type {
+  OfflineDocument,
+  OfflineAttr,
+  OfflineExpectChain,
+  OfflineTestContext,
+  OfflineSuiteContext,
+  OfflineRunOptions,
+  OfflineRunResult,
+} from './offline';

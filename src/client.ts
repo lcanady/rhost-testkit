@@ -11,6 +11,13 @@ export function stripAnsi(s: string): string {
     return s.replace(ANSI_RE, '');
 }
 
+export interface CommandOptions {
+    /** Override the global commandSettleMs for this single call. */
+    settleMs?: number;
+    /** Timeout in ms. Defaults to the client's default timeout. */
+    timeout?: number;
+}
+
 export interface RhostClientOptions {
     /** Server hostname. Default: 'localhost' */
     host?: string;
@@ -155,12 +162,89 @@ export class RhostClient {
      * Run a MUSHcode command and collect all output lines until the
      * internal sentinel is received.
      *
+     * The second argument can be a timeout number (legacy) or an options object.
+     * Use `settleMs` to override the global commandSettleMs for a single call —
+     * this lets you pay the settle cost only on commands that produce deferred
+     * output (e.g. `@force`) while non-deferred commands run at full speed.
+     *
      * @example
      *   const lines = await client.command('look here');
      *   const lines = await client.command('@pemit me=hello');
+     *   // Only pay settle cost on @force:
+     *   await client.command(`@force ${player}=+cg/submit`, { settleMs: 300 });
      */
-    async command(cmd: string, timeout?: number): Promise<string[]> {
-        return this._collectCommand(cmd, this.doStripAnsi, timeout);
+    async command(cmd: string, timeoutOrOpts?: number | CommandOptions): Promise<string[]> {
+        const opts = typeof timeoutOrOpts === 'number'
+            ? { timeout: timeoutOrOpts }
+            : (timeoutOrOpts ?? {});
+        const settleMs = opts.settleMs ?? this.commandSettleMs;
+        return this._collectCommand(cmd, this.doStripAnsi, opts.timeout, settleMs);
+    }
+
+    /**
+     * Evaluate N expressions in a single pipelined batch.
+     *
+     * All sends are issued before waiting for any response, eliminating the
+     * per-expression START-sentinel round trip. Results are returned in the
+     * same order as `expressions`.
+     *
+     * Use this instead of sequential `await client.eval()` calls whenever
+     * the expressions are independent of each other.
+     *
+     * @example
+     *   const [cg, cgData] = await client.evalAll([
+     *     'search(name=Chargen <cg>)',
+     *     'search(name=Chargen Data <cg>)',
+     *   ]);
+     */
+    async evalAll(expressions: string[], timeout?: number): Promise<string[]> {
+        if (expressions.length === 0) return [];
+        if (expressions.length === 1) return [await this.eval(expressions[0], timeout)];
+
+        const ms = timeout ?? this.defaultTimeout;
+        const ids = expressions.map(() => this.makeId());
+
+        // Pipeline ALL sends before waiting for any response
+        for (let i = 0; i < expressions.length; i++) {
+            this.conn.send(`@pemit me=RHOST_EVAL_START_${ids[i]}`);
+            this.conn.send(`think ${expressions[i]}`);
+            this.conn.send(`@pemit me=RHOST_EVAL_END_${ids[i]}`);
+        }
+
+        // Read responses in order — they arrive in the same sequence MUSH processed them
+        const results: string[] = [];
+        for (let i = 0; i < expressions.length; i++) {
+            const startMarker = `RHOST_EVAL_START_${ids[i]}`;
+            const endMarker   = `RHOST_EVAL_END_${ids[i]}`;
+
+            await this.readUntilMarker(startMarker, ms);
+
+            const resultLines: string[] = [];
+            while (true) {
+                const line = await this.conn.lines.next(ms);
+                const clean = this.doStripAnsi ? stripAnsi(line) : line;
+                if ((this.doStripAnsi ? clean : stripAnsi(line)).includes(endMarker)) break;
+                resultLines.push(clean);
+            }
+            results.push(resultLines.join('\n'));
+        }
+
+        return results;
+    }
+
+    /**
+     * Send a command without waiting for any response.
+     *
+     * Useful for batching fire-and-forget setup commands in `beforeAll` where
+     * you only need to confirm the last one landed.
+     *
+     * @example
+     *   client.sendNoWait(`&_CG_STATUS ${player}=CHARGEN`);
+     *   client.sendNoWait(`&_CG_METHOD ${player}=streetrat`);
+     *   await client.command(`&_CG_ROLE ${player}=Solo`); // wait on last one
+     */
+    sendNoWait(cmd: string): void {
+        this.conn.send(cmd);
     }
 
     /**
@@ -264,14 +348,16 @@ export class RhostClient {
         cmd: string,
         strip: boolean,
         timeout?: number,
+        settleMs?: number,
     ): Promise<string[]> {
         const id = this.makeId();
         const endMarker = `RHOST_CMD_END_${id}`;
         const ms = timeout ?? this.defaultTimeout;
+        const effectiveSettle = settleMs ?? this.commandSettleMs;
 
         this.conn.send(cmd);
-        if (this.commandSettleMs > 0) {
-            await new Promise(r => setTimeout(r, this.commandSettleMs));
+        if (effectiveSettle > 0) {
+            await new Promise(r => setTimeout(r, effectiveSettle));
         }
         this.conn.send(`@pemit me=${endMarker}`);
 

@@ -5,6 +5,9 @@ import { RhostExpect, SnapshotContext } from './expect';
 import { RhostWorld } from './world';
 import { Reporter } from './reporter';
 import { SnapshotManager, SnapshotStats } from './snapshots';
+import { MockRhostClient } from './offline/mock-client';
+import { OfflineWorldProxy } from './offline/mock-world';
+import { ReducedExpect, OfflineCounter } from './offline/reduced-expect';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -14,6 +17,12 @@ export interface RunResult {
     passed: number;
     failed: number;
     skipped: number;
+    /** Tests that ran in offline mode (syntax-checked but behavioral assertions skipped). */
+    offlineSkipped: number;
+    /** Total behavioral assertions skipped across all offline tests. */
+    behavioralSkipped: number;
+    /** Whether this run connected to a server or ran entirely offline. */
+    mode: 'online' | 'offline';
     total: number;
     duration: number;
     failures: Array<{ suite: string; test: string; error: Error }>;
@@ -22,6 +31,23 @@ export interface RunResult {
 
 export interface TestContext {
     expect(expression: string): RhostExpect;
+    /**
+     * Evaluate N expressions in one pipelined batch and assert on each result.
+     *
+     * Pass `[expression, expected]` pairs. A string `expected` uses exact
+     * match (`.toBe`); a RegExp uses `.test()` (equivalent to `.toMatch`).
+     * All failures are collected before throwing, so you see every broken
+     * assertion at once rather than stopping at the first.
+     *
+     * @example
+     *   await expectAll([
+     *     [`u(${cg}/F.IS.STAT,int)`,  '1'],
+     *     [`u(${cg}/F.IS.STAT,INT)`,  '1'],
+     *     [`u(${cg}/F.IS.STAT,foo)`,  '0'],
+     *     [`u(${cg}/F.VALIDATE,${p},int,0)`, /minimum/],
+     *   ]);
+     */
+    expectAll(cases: Array<[string, string | RegExp]>): Promise<void>;
     client: RhostClient;
     world: RhostWorld;
     /**
@@ -117,6 +143,22 @@ export interface RunnerOptions extends RhostClientOptions {
      * Default: false
      */
     updateSnapshots?: boolean;
+    /**
+     * Run tests in offline mode — no server connection required.
+     *
+     * In offline mode:
+     * - `world.set()` validates softcode syntax and lint rules immediately,
+     *   failing the test if errors are found.
+     * - `expect(expr).toBe(...)` and all other behavioral matchers are silently
+     *   skipped — they can't run without a live server.
+     * - Syntax errors in `expect()` expressions still fail the test.
+     *
+     * Also activated by the `RHOST_OFFLINE=1` environment variable.
+     *
+     * Set to `'auto'` to try connecting first and silently fall back to
+     * offline mode if the server is unreachable.
+     */
+    offline?: boolean | 'auto';
 }
 
 // ---------------------------------------------------------------------------
@@ -195,13 +237,38 @@ export class RhostRunner {
         const snapshotFile = this.resolveSnapshotFile(options);
         const snapshots = new SnapshotManager(snapshotFile, updateMode);
 
-        const client = new RhostClient(options);
-        await client.connect();
-        await client.login(options.username, options.password);
-
+        const offlineOpt = options.offline ?? (process.env['RHOST_OFFLINE'] === '1' ? true : undefined);
         const reporter = new Reporter(verbose);
+
+        let isOffline = offlineOpt === true;
+        let client: RhostClient;
+
+        if (offlineOpt === 'auto') {
+            try {
+                client = new RhostClient(options);
+                await client.connect();
+                await client.login(options.username, options.password);
+                isOffline = false;
+            } catch (err) {
+                isOffline = true;
+                client = new MockRhostClient();
+                const reason = err instanceof Error ? err.message : String(err);
+                reporter.offlineBanner(`server unreachable — ${reason}`);
+            }
+        } else if (isOffline) {
+            client = new MockRhostClient();
+            reporter.offlineBanner();
+        } else {
+            client = new RhostClient(options);
+            await client.connect();
+            await client.login(options.username, options.password);
+        }
+
         const result: RunResult = {
-            passed: 0, failed: 0, skipped: 0, total: 0, duration: 0,
+            passed: 0, failed: 0, skipped: 0,
+            offlineSkipped: 0, behavioralSkipped: 0,
+            mode: isOffline ? 'offline' : 'online',
+            total: 0, duration: 0,
             failures: [],
             snapshots: { matched: 0, written: 0, updated: 0, obsolete: 0 },
         };
@@ -216,7 +283,7 @@ export class RhostRunner {
             beforeAll: [], afterAll: [], beforeEach: [], afterEach: [],
         };
 
-        await this._runSuite(root, client, reporter, result, [], 0, [], snapshots);
+        await this._runSuite(root, client, reporter, result, [], 0, [], snapshots, isOffline);
 
         result.duration = Date.now() - start;
 
@@ -225,7 +292,7 @@ export class RhostRunner {
 
         reporter.summary(result);
 
-        await client.disconnect();
+        if (!isOffline) await client.disconnect();
         return result;
     }
 
@@ -314,6 +381,7 @@ export class RhostRunner {
         depth: number,
         suitePath: string[],
         snapshots: SnapshotManager,
+        isOffline = false,
     ): Promise<void> {
         // Skip entire suite if marked skip
         if (suite.mode === 'skip') {
@@ -333,7 +401,7 @@ export class RhostRunner {
         const childPath = suite.name ? [...suitePath, suite.name] : suitePath;
 
         // Run suite-level beforeAll hooks — if one throws, count all suite tests as failures
-        const hookCtx = { client, world: new RhostWorld(client) };
+        const hookCtx = { client, world: isOffline ? new OfflineWorldProxy(client as MockRhostClient) : new RhostWorld(client) };
         for (const hook of suite.beforeAll) {
             try {
                 await hook(hookCtx);
@@ -355,6 +423,7 @@ export class RhostRunner {
                     depth + (suite.name ? 1 : 0),
                     childPath,
                     snapshots,
+                    isOffline,
                 );
             } else {
                 const skip = !activeChildren.includes(child) || child.mode === 'skip';
@@ -364,6 +433,7 @@ export class RhostRunner {
                     childPath,
                     depth + (suite.name ? 1 : 0),
                     snapshots,
+                    isOffline,
                 );
             }
         }
@@ -385,6 +455,7 @@ export class RhostRunner {
         suitePath: string[],
         depth: number,
         snapshots: SnapshotManager,
+        isOffline = false,
     ): Promise<void> {
         result.total++;
 
@@ -401,7 +472,9 @@ export class RhostRunner {
         // Reset snapshot counter for this test
         snapshots.resetCounter(testKey);
 
-        const world = new RhostWorld(client);
+        const world = isOffline
+            ? new OfflineWorldProxy(client as MockRhostClient)
+            : new RhostWorld(client);
         const hookCtx = { client, world };
 
         const snapshotCtx: SnapshotContext = {
@@ -409,10 +482,41 @@ export class RhostRunner {
             testName: testKey,
         };
 
+        const counter: OfflineCounter = { behavioralSkips: 0 };
+
         const testCtx: TestContext = {
             client,
             world,
-            expect: (expr: string) => new RhostExpect(client, expr, false, snapshotCtx),
+            expect: (expr: string) => isOffline
+                ? new ReducedExpect(expr, false, snapshotCtx, counter) as unknown as RhostExpect
+                : new RhostExpect(client, expr, false, snapshotCtx),
+            expectAll: async (cases) => {
+                if (isOffline) {
+                    for (const [expr] of cases) {
+                        await new ReducedExpect(expr, false, snapshotCtx, counter).toBe('');
+                    }
+                    return;
+                }
+                const results = await client.evalAll(cases.map(c => c[0]));
+                const failures: string[] = [];
+                for (let i = 0; i < cases.length; i++) {
+                    const actual = results[i].replace(/[\r\n]+$/, '');
+                    const expected = cases[i][1];
+                    const pass = typeof expected === 'string'
+                        ? actual === expected
+                        : expected.test(actual);
+                    if (!pass) {
+                        failures.push(
+                            `  [${i}] expect(${JSON.stringify(cases[i][0])})\n` +
+                            `        Expected: ${expected instanceof RegExp ? expected : JSON.stringify(expected)}\n` +
+                            `        Received: ${JSON.stringify(actual)}`
+                        );
+                    }
+                }
+                if (failures.length > 0) {
+                    throw new Error(`expectAll: ${failures.length} of ${cases.length} failed:\n${failures.join('\n')}`);
+                }
+            },
             preview: (input: string, opts?: PreviewOptions) => client.preview(input, opts),
         };
 
@@ -435,8 +539,14 @@ export class RhostRunner {
             const timeoutMs = test.timeout ?? 15000;
             await this._withTimeout(test.fn(testCtx), timeoutMs, test.name);
             const ms = Date.now() - t0;
-            result.passed++;
-            reporter.testPass(test.name, ms, depth);
+            if (isOffline) {
+                result.offlineSkipped++;
+                result.behavioralSkipped += counter.behavioralSkips;
+                reporter.testOfflineSkip(test.name, depth, counter.behavioralSkips);
+            } else {
+                result.passed++;
+                reporter.testPass(test.name, ms, depth);
+            }
         } catch (err) {
             const ms = Date.now() - t0;
             result.failed++;

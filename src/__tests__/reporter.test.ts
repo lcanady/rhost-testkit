@@ -21,7 +21,8 @@ function captureStdout(fn: () => void): string {
 
 function makeResult(overrides: Partial<RunResult> = {}): RunResult {
     return {
-        passed: 0, failed: 0, skipped: 0, total: 0, duration: 0, failures: [],
+        passed: 0, failed: 0, skipped: 0, offlineSkipped: 0, behavioralSkipped: 0,
+        mode: 'online', total: 0, duration: 0, failures: [],
         snapshots: { matched: 0, written: 0, updated: 0, obsolete: 0 },
         ...overrides,
     };
