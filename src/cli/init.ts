@@ -28,6 +28,9 @@ const EXAMPLE_MUSH = `\
 const EXAMPLE_TEST = `\
 import { RhostRunner } from '@rhost/testkit';
 
+const PASS = process.env.RHOST_PASS;
+if (!PASS) { console.error('RHOST_PASS env var is required'); process.exit(1); }
+
 const runner = new RhostRunner();
 
 runner.describe('Example', ({ it }) => {
@@ -40,7 +43,7 @@ runner.run({
   host: process.env.RHOST_HOST ?? 'localhost',
   port: Number(process.env.RHOST_PORT ?? 4201),
   username: process.env.RHOST_USER ?? '#1',
-  password: process.env.RHOST_PASS ?? 'potrzebie',
+  password: PASS,
 });
 `;
 

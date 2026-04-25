@@ -1,6 +1,6 @@
 {
   "name": "@rhost/testkit",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "SDK for programmatically testing MUSHcode against a RhostMUSH server",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -98,6 +98,12 @@
     "testPathIgnorePatterns": [],
     "moduleNameMapper": {
       "^@ursamu/mushcode$": "<rootDir>/scripts/mushcode-compat.js"
+    },
+    "coverageThreshold": {
+      "global": {
+        "lines": 80,
+        "statements": 80
+      }
     }
   }
 }
