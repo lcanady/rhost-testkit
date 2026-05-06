@@ -1,6 +1,6 @@
 {
   "name": "@rhost/testkit",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "SDK for programmatically testing MUSHcode against a RhostMUSH server",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
