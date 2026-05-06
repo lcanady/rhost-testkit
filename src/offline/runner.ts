@@ -102,11 +102,11 @@ export class OfflineRunner {
     return this;
   }
 
-  run(options: OfflineRunOptions = {}): OfflineRunResult {
+  run(options: OfflineRunOptions = {}): Promise<OfflineRunResult> {
     const useJest = options.useJest ?? (typeof describe !== 'undefined' && typeof it !== 'undefined');
 
     if (useJest) {
-      return this._runJest(this.root, options);
+      return Promise.resolve(this._runJest(this.root, options));
     }
     return this._runStandalone(this.root, options);
   }
@@ -146,10 +146,10 @@ export class OfflineRunner {
   // Standalone executor
   // -------------------------------------------------------------------------
 
-  private _runStandalone(root: SuiteNode, opts: OfflineRunOptions): OfflineRunResult {
+  private async _runStandalone(root: SuiteNode, opts: OfflineRunOptions): Promise<OfflineRunResult> {
     const result: OfflineRunResult = { passed: 0, failed: 0, skipped: 0, total: 0, duration: 0, failures: [] };
     const start = Date.now();
-    this._execSuite(root, [], result, opts);
+    await this._execSuite(root, [], result, opts);
     result.duration = Date.now() - start;
     return result;
   }

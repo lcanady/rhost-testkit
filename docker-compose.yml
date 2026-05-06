@@ -22,7 +22,7 @@ services:
       - "127.0.0.1:${RHOST_PORT:-4201}:4201"
       - "127.0.0.1:${RHOST_API_PORT:-4202}:4202"
     volumes:
-      - ./persistent_data:/persistent
+      - ${RHOST_DATA_DIR:-./persistent_data}:/persistent
     environment:
       - RHOST_PORT=${RHOST_PORT:-4201}
       - RHOST_MUD_NAME=${RHOST_MUD_NAME:-RhostMUSH}

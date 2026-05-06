@@ -1,28 +1,36 @@
-name: Publish to npm
+name: CI
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-  publish:
+  test:
+    name: Test (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write  # for npm provenance
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: ${{ matrix.node }}
           cache: 'npm'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Type-check
+        run: npm run build
 
       - name: Unit tests
         run: npm test
@@ -32,11 +40,3 @@ jobs:
 
       - name: Dependency vulnerability audit
         run: npm audit --audit-level=high
-
-      - name: Build
-        run: npm run build
-
-      - name: Publish
-        run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -21,6 +21,18 @@
  *
  *   RhostContainer.fromSource(undefined, { scriptsDir: './my-scripts' })
  *
+ * Compile-time features (fromSource only)
+ * ────────────────────────────────────────
+ *   RhostContainer.fromSource(undefined, {
+ *     build: { enableWebSockets: true, enableSsl: true }
+ *   })
+ *
+ * stunnel TLS wrapper
+ * ───────────────────
+ *   RhostContainer.fromImage('lcanady/rhostmush:latest', {
+ *     stunnel: { enable: true, acceptPort: 4203, certFile: './cert.pem' }
+ *   })
+ *
  * See `src/config.ts` for the full `RhostConfig` interface.
  */
 import * as fs from 'fs';
@@ -30,11 +42,14 @@ import {
     StartedTestContainer,
     Wait,
 } from 'testcontainers';
-import { RhostConfig, loadConfig } from './config';
+import { RhostConfig, loadConfig, buildArgsFromConfig, stunnelEnvFromConfig } from './config';
 
 export interface ContainerConnectionInfo {
     host: string;
+    /** Plain MUSH / telnet port */
     port: number;
+    /** stunnel TLS port, if stunnel was enabled */
+    stunnelPort?: number;
 }
 
 /** Path inside the container where execscript files live. */
@@ -42,6 +57,10 @@ const CONTAINER_SCRIPTS_PATH = '/home/rhost/game/scripts';
 
 /** Path inside the container where mush.config lives. */
 const CONTAINER_MUSH_CONFIG_PATH = '/home/rhost/game/mush.config';
+
+/** Path inside the container where stunnel cert/key are copied. */
+const CONTAINER_STUNNEL_CERT_PATH = '/home/rhost/stunnel-cert.pem';
+const CONTAINER_STUNNEL_KEY_PATH  = '/home/rhost/stunnel-key.pem';
 
 type ContainerFactory = () => Promise<GenericContainer>;
 
@@ -74,6 +93,9 @@ export class RhostContainer {
      * The first build clones and compiles RhostMUSH from source — allow 5-10
      * minutes. Subsequent runs reuse Docker's layer cache.
      *
+     * Compile-time features in `config.build` (enableWebSockets, enableSsl,
+     * enablePueblo, enableReality, extraCflags) are passed as Docker build args.
+     *
      * @param projectRoot Path to the rhostmush-docker directory.
      *   Defaults to `../` relative to this file (i.e. the repo root).
      * @param config Optional config overrides. If omitted, `rhost.config.json`
@@ -87,19 +109,19 @@ export class RhostContainer {
         const cfg = config ?? loadConfig() ?? {};
 
         return new RhostContainer(async () => {
-            return GenericContainer.fromDockerfile(root).build();
+            let builder = GenericContainer.fromDockerfile(root);
+
+            if (cfg.build) {
+                builder = builder.withBuildArgs(buildArgsFromConfig(cfg.build));
+            }
+
+            return builder.build();
         }, cfg);
     }
 
     /**
      * Start the container. Blocks until port 4201 is accepting connections.
-     * Returns the host and dynamically-assigned port to pass to `RhostClient`.
-     *
-     * If `config.scriptsDir` is set, the directory is copied into the container
-     * at `/home/rhost/game/scripts` before startup.
-     *
-     * If `config.mushConfig` is set, the file is copied into the container at
-     * `/home/rhost/game/mush.config` before startup.
+     * Returns host/port info to pass to `RhostClient`.
      *
      * @param startupTimeout Max ms to wait for the server to be ready.
      *   Default: 120000 (2 min). Increase for slow machines or first builds.
@@ -107,11 +129,10 @@ export class RhostContainer {
     async start(startupTimeout = 120_000): Promise<ContainerConnectionInfo> {
         let base = await this.factory();
 
+        // ── File copies ───────────────────────────────────────────────────────
         if (this.config.scriptsDir) {
             if (!fs.existsSync(this.config.scriptsDir)) {
-                throw new Error(
-                    `RhostContainer: scriptsDir not found: ${this.config.scriptsDir}`
-                );
+                throw new Error(`RhostContainer: scriptsDir not found: ${this.config.scriptsDir}`);
             }
             base = base.withCopyDirectoriesToContainer([{
                 source: this.config.scriptsDir,
@@ -121,9 +142,7 @@ export class RhostContainer {
 
         if (this.config.mushConfig) {
             if (!fs.existsSync(this.config.mushConfig)) {
-                throw new Error(
-                    `RhostContainer: mushConfig not found: ${this.config.mushConfig}`
-                );
+                throw new Error(`RhostContainer: mushConfig not found: ${this.config.mushConfig}`);
             }
             base = base.withCopyFilesToContainer([{
                 source: this.config.mushConfig,
@@ -131,8 +150,53 @@ export class RhostContainer {
             }]);
         }
 
+        // ── stunnel ──────────────────────────────────────────────────────────
+        const stunnelCfg = this.config.stunnel;
+        const stunnelEnabled = stunnelCfg?.enable === true;
+        const stunnelAcceptPort = stunnelCfg?.acceptPort ?? 4203;
+
+        if (stunnelEnabled) {
+            // Build env vars from scratch rather than using stunnelEnvFromConfig()
+            // so that cert/key paths are always set to the in-container paths,
+            // never host paths that wouldn't exist inside the container.
+            const envVars: Record<string, string> = { STUNNEL_ENABLE: 'true' };
+            if (stunnelCfg!.acceptPort)  envVars['STUNNEL_ACCEPT_PORT']  = String(stunnelCfg!.acceptPort);
+            if (stunnelCfg!.connectPort) envVars['STUNNEL_CONNECT_PORT'] = String(stunnelCfg!.connectPort);
+
+            const certFile = stunnelCfg!.certFile;
+            const keyFile  = stunnelCfg!.keyFile;
+
+            if (certFile) {
+                if (!fs.existsSync(certFile)) {
+                    throw new Error(`RhostContainer: stunnel.certFile not found: ${certFile}`);
+                }
+                base = base.withCopyFilesToContainer([{ source: certFile, target: CONTAINER_STUNNEL_CERT_PATH }]);
+                envVars['STUNNEL_CERT'] = CONTAINER_STUNNEL_CERT_PATH;
+
+                // Separate key file only when it differs from the cert file
+                if (keyFile && keyFile !== certFile) {
+                    if (!fs.existsSync(keyFile)) {
+                        throw new Error(`RhostContainer: stunnel.keyFile not found: ${keyFile}`);
+                    }
+                    base = base.withCopyFilesToContainer([{ source: keyFile, target: CONTAINER_STUNNEL_KEY_PATH }]);
+                    envVars['STUNNEL_KEY'] = CONTAINER_STUNNEL_KEY_PATH;
+                }
+                // If keyFile === certFile (combined PEM), stunnel reads key from the same file;
+                // STUNNEL_KEY is left unset so entrypoint.sh defaults it to STUNNEL_CERT.
+            }
+            // If no certFile is given, entrypoint.sh auto-generates a self-signed cert.
+
+            for (const [k, v] of Object.entries(envVars)) {
+                base = base.withEnvironment({ [k]: v });
+            }
+        }
+
+        // ── Ports ─────────────────────────────────────────────────────────────
+        const exposedPorts: number[] = [4201];
+        if (stunnelEnabled) exposedPorts.push(stunnelAcceptPort);
+
         this.started = await base
-            .withExposedPorts(4201)
+            .withExposedPorts(...exposedPorts)
             .withWaitStrategy(
                 Wait.forListeningPorts().withStartupTimeout(startupTimeout)
             )
@@ -152,9 +216,14 @@ export class RhostContainer {
         if (!this.started) {
             throw new Error('Container is not running — call start() first.');
         }
-        return {
+        const info: ContainerConnectionInfo = {
             host: this.started.getHost(),
             port: this.started.getMappedPort(4201),
         };
+        const stunnelAcceptPort = this.config.stunnel?.acceptPort ?? 4203;
+        if (this.config.stunnel?.enable) {
+            info.stunnelPort = this.started.getMappedPort(stunnelAcceptPort);
+        }
+        return info;
     }
 }

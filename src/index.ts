@@ -90,6 +90,10 @@ export { SnapshotManager, SnapshotStats, SnapshotStatus, SnapshotCheckResult, fo
 // Watch mode
 export { RhostWatcher, WatchOptions, discoverTestFiles } from './watcher';
 
+// Pueblo markup → semantic HTML converter
+export { convertPueblo, parsePuebloHandshake, generatePuebloHandshake } from './pueblo';
+export type { PuebloConvertOptions, PuebloHandshake } from './pueblo';
+
 // Offline static analysis — no server required
 export {
   parseDocument,

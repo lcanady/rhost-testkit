@@ -11,7 +11,7 @@ find . -maxdepth 1 -type f \( -name "*.config" -o -name "*.conf" -o -name "Start
 # Clean up stale PID/socket files from previous runs
 rm -f *.pid .socket*
 
-PERSISTENT_ROOT="/persistent"
+PERSISTENT_ROOT="${RHOST_DATA_DIR:-/persistent}"
 
 setup_persistent() {
     local target=$1
@@ -30,6 +30,16 @@ setup_persistent() {
 if [ -d "$PERSISTENT_ROOT" ]; then
     setup_persistent "data"
     setup_persistent "txt"
+
+    # Persist mush.config (runtime server settings editable from host)
+    if [ ! -f "$PERSISTENT_ROOT/mush.config" ] && [ -f mush.config ]; then
+        echo "Initializing persistent mush.config from image..."
+        cp -f mush.config "$PERSISTENT_ROOT/mush.config"
+    fi
+    if [ -f "$PERSISTENT_ROOT/mush.config" ]; then
+        rm -f mush.config
+        ln -s "$PERSISTENT_ROOT/mush.config" mush.config
+    fi
 
     # Initialize netrhost.conf on first run
     if [ ! -f "$PERSISTENT_ROOT/netrhost.conf" ]; then
@@ -57,8 +67,18 @@ execscripthome /home/rhost/game/scripts
 EOF
     fi
 
+    # Build a combined netrhost.conf: base + any extra *.conf files in the
+    # persistent dir (sorted, excluding netrhost.conf itself).  Later entries
+    # win in RhostMUSH's parser, so drop-in overrides simply go in a new file.
+    COMBINED="/tmp/netrhost_combined.conf"
+    cp "$PERSISTENT_ROOT/netrhost.conf" "$COMBINED"
+    while IFS= read -r -d '' f; do
+        printf '\n# --- %s ---\n' "$f" >> "$COMBINED"
+        cat "$f" >> "$COMBINED"
+    done < <(find "$PERSISTENT_ROOT" -maxdepth 1 -name "*.conf" ! -name "netrhost.conf" -print0 | sort -z)
+
     rm -f netrhost.conf
-    ln -s "$PERSISTENT_ROOT/netrhost.conf" netrhost.conf
+    ln -s "$COMBINED" netrhost.conf
 fi
 
 # First-run DB initialization
@@ -76,6 +96,45 @@ if [ ! -f data/netrhost.gdbm.db ]; then
         ./mkindx "$f" "./txt/$base.indx"
     done
     echo "Initialization complete."
+fi
+
+# ── Optional stunnel TLS wrapper ─────────────────────────────────────────────
+# Set STUNNEL_ENABLE=true to wrap the MUSH port (or a WebSocket port) in TLS.
+# Required env vars when enabled:
+#   STUNNEL_CERT   — path to PEM certificate (or combined cert+key)
+#   STUNNEL_KEY    — path to PEM private key  (may equal STUNNEL_CERT)
+# Optional:
+#   STUNNEL_ACCEPT_PORT  — port stunnel listens on (default: 4203)
+#   STUNNEL_CONNECT_PORT — port stunnel forwards to (default: RHOST_PORT / 4201)
+if [ "${STUNNEL_ENABLE:-false}" = "true" ]; then
+    STUNNEL_ACCEPT="${STUNNEL_ACCEPT_PORT:-4203}"
+    STUNNEL_CONNECT="${STUNNEL_CONNECT_PORT:-${RHOST_PORT:-4201}}"
+    STUNNEL_CERT_FILE="${STUNNEL_CERT:-}"
+    STUNNEL_KEY_FILE="${STUNNEL_KEY:-$STUNNEL_CERT_FILE}"
+
+    if [ -z "$STUNNEL_CERT_FILE" ]; then
+        echo "[stunnel] WARNING: STUNNEL_ENABLE=true but STUNNEL_CERT is not set." >&2
+        echo "[stunnel] Generating a self-signed certificate for testing purposes." >&2
+        STUNNEL_CERT_FILE="/tmp/stunnel-selfsigned.pem"
+        STUNNEL_KEY_FILE="$STUNNEL_CERT_FILE"
+        openssl req -x509 -newkey rsa:2048 -keyout "$STUNNEL_CERT_FILE" \
+            -out "$STUNNEL_CERT_FILE" -days 365 -nodes \
+            -subj "/CN=rhostmush" 2>/dev/null
+    fi
+
+    cat > /tmp/stunnel.conf <<STUNCONF
+foreground = no
+pid = /tmp/stunnel.pid
+
+[mush-tls]
+accept  = $STUNNEL_ACCEPT
+connect = 127.0.0.1:$STUNNEL_CONNECT
+cert    = $STUNNEL_CERT_FILE
+key     = $STUNNEL_KEY_FILE
+STUNCONF
+
+    echo "[stunnel] Starting: accepting TLS on :${STUNNEL_ACCEPT}, forwarding to :${STUNNEL_CONNECT}"
+    stunnel4 /tmp/stunnel.conf
 fi
 
 echo "Starting RhostMUSH..."

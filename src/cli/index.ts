@@ -10,6 +10,7 @@ import { runDeployCli } from './deploy';
 import { runFmtCli } from './fmt';
 import { runMushFormatCli } from './mush-format';
 import { runLintCli } from './lint';
+import { runServerCli } from './server';
 
 const args = process.argv.slice(2);
 const cmd = args[0];
@@ -43,6 +44,10 @@ switch (cmd) {
     runLintCli(args.slice(1));
     break;
 
+  case 'server':
+    runServerCli(args.slice(1));
+    break;
+
   case '--version':
   case '-v': {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -73,6 +78,7 @@ USAGE
   rhost-testkit <command> [options]
 
 COMMANDS
+  server      Start a RhostMUSH Docker server (no prior setup required)
   validate    Validate a softcode expression offline (no server needed)
   watch       Watch test files and re-run on change
   init        Scaffold project structure and optional CI/CD templates
@@ -88,6 +94,8 @@ OPTIONS
 Run \`rhost-testkit <command> --help\` for command-specific options.
 
 EXAMPLES
+  rhost-testkit server
+  rhost-testkit server --port 7000 --config ./rhost.config.json
   rhost-testkit validate "add(2,3)"
   rhost-testkit validate --file mycode.mush
   rhost-testkit watch

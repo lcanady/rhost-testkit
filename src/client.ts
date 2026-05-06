@@ -55,6 +55,22 @@ export interface RhostClientOptions {
      * aborted after this many milliseconds. Default: 10000
      */
     connectTimeout?: number;
+    /**
+     * When true, connects via WebSocket (RFC 6455) instead of raw TCP.
+     * Requires RhostMUSH compiled with ENABLE_WEBSOCKETS. Default: false.
+     */
+    useWebSocket?: boolean;
+    /**
+     * WebSocket request path sent in the HTTP upgrade handshake.
+     * Only relevant when useWebSocket is true. Default: '/'
+     */
+    websocketPath?: string;
+    /**
+     * Use a secure WebSocket connection (wss://) instead of plain ws://.
+     * Requires the port to be fronted by stunnel or another TLS terminator.
+     * Only relevant when useWebSocket is true. Default: false
+     */
+    websocketSecure?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +119,11 @@ export class RhostClient {
     private connectTimeout: number;
 
     constructor(options: RhostClientOptions = {}) {
-        this.conn = new MushConnection(options.host ?? 'localhost', options.port ?? 4201);
+        this.conn = new MushConnection(options.host ?? 'localhost', options.port ?? 4201, {
+            useWebSocket: options.useWebSocket,
+            websocketPath: options.websocketPath,
+            websocketSecure: options.websocketSecure,
+        });
         this.defaultTimeout = options.timeout ?? 10000;
         this.bannerTimeout = options.bannerTimeout ?? 300;
         this.doStripAnsi = options.stripAnsi !== false;
