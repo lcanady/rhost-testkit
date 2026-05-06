@@ -154,7 +154,7 @@ EXAMPLES
   rhost-server
   rhost-server --port 7000
   rhost-server --config ./rhost.config.json
-  rhost-server --build-from-source --enable-websockets --enable-ssl
+  rhost-server --build-from-source --enable-websockets
   rhost-server --stunnel --stunnel-port 4203 --stunnel-cert ./cert.pem
   rhost-server --build-from-source --enable-websockets --stunnel
 `.trim());

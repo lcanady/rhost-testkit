@@ -1,6 +1,6 @@
 {
   "name": "@rhost/server",
-  "version": "1.6.2",
+  "version": "1.6.4",
   "description": "Zero-config RhostMUSH Docker server — start, init, and configure in one command",
   "bin": {
     "rhost-server": "./bin.js",
