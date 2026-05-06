@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { MushConnection } from './connection';
+import { generatePuebloHandshake } from './pueblo';
 
 // ESC [ ... m  — SGR sequences (colors, bold, etc.)
 // ESC [ ... (A-Z or a-z)  — cursor movement, erase, etc.
@@ -71,6 +72,12 @@ export interface RhostClientOptions {
      * Only relevant when useWebSocket is true. Default: false
      */
     websocketSecure?: boolean;
+    /**
+     * When true, sends the Pueblo handshake (PUEBLOCLIENT 1.0.1\r\n) after the
+     * welcome banner drains, then waits for the server's </puebloclient> ack before
+     * returning from connect(). Default: false
+     */
+    usePueblo?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +124,8 @@ export class RhostClient {
     private commandSettleMs: number;
 
     private connectTimeout: number;
+    private puebloActive = false;
+    private usePueblo: boolean;
 
     constructor(options: RhostClientOptions = {}) {
         this.conn = new MushConnection(options.host ?? 'localhost', options.port ?? 4201, {
@@ -130,6 +139,7 @@ export class RhostClient {
         this.commandSettleMs = options.commandSettleMs ?? 0;
         this.paceMs = options.paceMs ?? 0;
         this.connectTimeout = options.connectTimeout ?? 10000;
+        this.usePueblo = options.usePueblo ?? false;
     }
 
     /**
@@ -138,6 +148,22 @@ export class RhostClient {
     async connect(): Promise<void> {
         await this.conn.connect(this.connectTimeout);
         await this.drainBanner(this.bannerTimeout);
+        if (this.usePueblo) {
+            // generatePuebloHandshake() returns 'PUEBLOCLIENT 1.0.1\r\n'; strip the
+            // trailing \r\n because send() appends it automatically.
+            const handshake = generatePuebloHandshake().replace(/\r\n$/, '');
+            this.conn.send(handshake);
+            while (true) {
+                const line = await this.conn.lines.next(this.connectTimeout);
+                if (line.includes('</puebloclient>')) break;
+            }
+            this.puebloActive = true;
+        }
+    }
+
+    /** Whether the server acknowledged the Pueblo handshake. */
+    get isPuebloActive(): boolean {
+        return this.puebloActive;
     }
 
     /**
