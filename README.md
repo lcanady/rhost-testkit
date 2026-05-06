@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/@rhost/testkit.svg)](https://www.npmjs.com/package/@rhost/testkit)
 [![npm downloads](https://img.shields.io/npm/dm/@rhost/testkit.svg)](https://www.npmjs.com/package/@rhost/testkit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![CI](https://github.com/RhostMUSH/rhostmush-docker/actions/workflows/security-tests.yml/badge.svg)](https://github.com/RhostMUSH/rhostmush-docker/actions/workflows/security-tests.yml)
+[![CI](https://github.com/lcanady/rhost-testkit/actions/workflows/ci.yml/badge.svg)](https://github.com/lcanady/rhost-testkit/actions/workflows/ci.yml)
 [![Security](https://img.shields.io/badge/Security-Audited-brightgreen.svg)](./SECURITY.md)
 
 A Jest-like testing framework for [RhostMUSH](https://github.com/RhostMUSH/trunk) softcode.
@@ -21,12 +21,14 @@ npm install @rhost/testkit
 - [Installation](#installation)
 - [How the runner works](#how-the-runner-works)
 - [Quick start](#quick-start)
+- [Starting a server](#starting-a-server)
 - [API reference — RhostRunner](#api-reference--rhostrunner)
 - [API reference — RhostExpect](#api-reference--rhostexpect)
 - [Snapshot testing](#snapshot-testing)
 - [API reference — RhostWorld](#api-reference--rhostworld)
 - [API reference — RhostClient](#api-reference--rhostclient)
 - [API reference — RhostContainer](#api-reference--rhostcontainer)
+- [Pueblo protocol](#pueblo-protocol)
 - [Offline validator](#offline-validator)
 - [Softcode formatter](#softcode-formatter)
 - [Benchmark mode](#benchmark-mode)
@@ -181,6 +183,74 @@ runner.describe('attributes', ({ it, beforeEach, afterEach }) => {
 
 > **Note:** A fresh `RhostWorld` instance is provided to each `it()` test via the `TestContext`.
 > It is automatically cleaned up (all created objects destroyed) after the test finishes, even on failure.
+
+---
+
+## Starting a server
+
+The `rhost-server` CLI (also available as `npx rhost-testkit server`) spins up a RhostMUSH Docker container and keeps it running until you press Ctrl+C. It is the quickest way to get a live MUSH for development or ad-hoc testing without writing any code.
+
+### Zero-config usage
+
+```bash
+npx rhost-testkit server
+# or, if you install globally:
+rhost-server
+```
+
+This pulls `lcanady/rhostmush:latest` from Docker Hub, binds it to port 4201, and prints a startup banner when the server is ready.
+
+### All flags
+
+**Server options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-p, --port <n>` | `4201` | Host port to publish the MUSH on. |
+| `--image <name>` | `lcanady/rhostmush:latest` | Docker image to use. |
+| `--build-from-source` | — | Build the image from source instead of pulling. |
+| `--project-root <path>` | `cwd` | Path to the rhostmush-docker repo (used with `--build-from-source`). |
+| `-c, --config <path>` | auto-discover | Path to `rhost.config.json` (or its directory). |
+| `--startup-timeout <ms>` | `120000` | Maximum milliseconds to wait for the server to be ready. |
+
+**Compile-time flags** _(require `--build-from-source`)_
+
+| Flag | Description |
+|------|-------------|
+| `--enable-websockets` | Enable WebSocket (RFC 6455) support at compile time. |
+| `--disable-websockets` | Disable WebSocket support. |
+| `--enable-reality` | Enable the REALMS/Reality Levels system. |
+| `--extra-cflags <flags>` | Additional raw CFLAGS passed to the compiler (e.g. `"-DFOO -DBAR"`). |
+
+**Stunnel (TLS) options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--stunnel` | — | Wrap the MUSH port in TLS via stunnel. |
+| `--stunnel-port <n>` | `4203` | Port stunnel listens on for incoming TLS connections. |
+| `--stunnel-connect-port <n>` | `4201` | Internal port stunnel forwards decrypted traffic to. |
+| `--stunnel-cert <path>` | auto-generated | PEM certificate file (a self-signed cert is generated when omitted). |
+| `--stunnel-key <path>` | same as cert | PEM private key file (defaults to `--stunnel-cert` for combined PEM). |
+
+### Example startup banner
+
+```
+Starting RhostMUSH — image: lcanady/rhostmush:latest
+Pulling/building image and booting container… (first build may take several minutes)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  RhostMUSH is running
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Host:      localhost
+  Port:      4201
+  Image:     lcanady/rhostmush:latest
+  Wizard:    Wizard / Nyctasia  (default credentials)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Press Ctrl+C to stop.
+```
+
+When `--build-from-source --enable-websockets --stunnel` are combined, the banner also prints the WebSocket URL and the stunnel TLS port.
 
 ---
 
@@ -555,6 +625,9 @@ const client = new RhostClient(options?: RhostClientOptions);
 | `stripAnsi` | `boolean` | `true` | Strip ANSI/VT100 codes from results |
 | `paceMs` | `number` | `0` | Delay between commands (flood control) |
 | `connectTimeout` | `number` | `10000` | TCP connection establishment timeout (ms) |
+| `useWebSocket` | `boolean` | `false` | Connect via WebSocket instead of raw TCP. Requires a server built with `ENABLE_WEBSOCKETS`. |
+| `websocketPath` | `string` | `'/'` | WebSocket request path sent in the HTTP upgrade. |
+| `websocketSecure` | `boolean` | `false` | Use `wss://` instead of `ws://`. Requires stunnel or another TLS terminator in front of the server. |
 
 ### Methods
 
@@ -643,26 +716,63 @@ Spins up a RhostMUSH Docker container for isolated test runs. Uses [testcontaine
 ### Factory methods
 
 ```typescript
-RhostContainer.fromImage(image?: string): RhostContainer
+RhostContainer.fromImage(image?: string, config?: RhostConfig): RhostContainer
 ```
-Use a pre-built Docker image. Default image: `'rhostmush:latest'`.
-Build it first: `docker build -t rhostmush:latest .` (from the rhostmush-docker repo root).
+Use a pre-built Docker image. Default image: `'lcanady/rhostmush:latest'`.
+The optional `config` argument lets you inject a `RhostConfig` directly rather than relying on `rhost.config.json` auto-discovery. Build flags in `config.build` are ignored for pre-built images, but `stunnel` and file-copy options still apply.
 
 ```typescript
-RhostContainer.fromSource(projectRoot?: string): RhostContainer
+RhostContainer.fromSource(projectRoot?: string, config?: RhostConfig): RhostContainer
 ```
 Build the image from the `Dockerfile` in the rhostmush-docker project root.
 First run: ~5–10 minutes (clones and compiles RhostMUSH from source). Subsequent runs use Docker layer cache.
 `projectRoot` defaults to `'../'` relative to the installed package location.
+
+**`RhostConfig` shape** (see `src/config.ts` for full TypeScript types):
+
+```typescript
+interface RhostConfig {
+    scriptsDir?: string;          // local directory copied to /home/rhost/game/scripts
+    mushConfig?: string;          // local file copied as mush.config
+
+    /** Compile-time features — fromSource() only; ignored for pre-built images. */
+    build?: {
+        enableWebSockets?: boolean; // Enable WebSocket (RFC 6455) support
+        enableReality?: boolean;    // Enable REALMS/Reality Levels
+        extraCflags?: string;       // Raw extra CFLAGS, e.g. "-DFOO -DBAR"
+    };
+
+    /** stunnel TLS wrapper — applies to both fromImage() and fromSource(). */
+    stunnel?: {
+        enable?: boolean;           // Launch stunnel inside the container
+        acceptPort?: number;        // TLS listen port (default: 4203)
+        connectPort?: number;       // Internal forward port (default: 4201)
+        certFile?: string;          // PEM cert — auto-generated self-signed when omitted
+        keyFile?: string;           // PEM key — defaults to certFile for combined PEM
+    };
+}
+```
+
+All paths in `RhostConfig` are resolved relative to the directory containing `rhost.config.json` when loaded from disk, or relative to `process.cwd()` when passed programmatically.
 
 ### Instance methods
 
 ```typescript
 await container.start(startupTimeout?: number): Promise<ContainerConnectionInfo>
 ```
-Starts the container and waits for port 4201 to accept connections.
+Starts the container and waits for listening ports to be ready.
 `startupTimeout` defaults to `120000` ms (2 minutes).
-Returns `{ host: string; port: number }` — the dynamically assigned host/port.
+Returns a `ContainerConnectionInfo` object with the dynamically assigned host/port.
+
+**`ContainerConnectionInfo`:**
+
+```typescript
+interface ContainerConnectionInfo {
+    host: string;
+    port: number;
+    stunnelPort?: number;  // present when stunnel is enabled; the mapped TLS port
+}
+```
 
 ```typescript
 await container.stop(): Promise<void>
@@ -702,6 +812,75 @@ const result = await runner.run({
 await container.stop();
 process.exit(result.failed > 0 ? 1 : 0);
 ```
+
+---
+
+## Pueblo protocol
+
+[Pueblo](http://www.legacymud.com/pueblo/pueblo_ext.html) is a protocol extension that allows a MUSH server to send HTML-enriched output to capable clients. RhostMUSH has native Pueblo support — no compile-time flag is required.
+
+### Handshake
+
+After connecting and before logging in, send the Pueblo handshake string. The server responds with a line beginning with `PUEBLOCLIENT`, signalling that it will now include HTML markup in its output.
+
+```typescript
+import { RhostClient, generatePuebloHandshake, parsePuebloHandshake, convertPueblo } from '@rhost/testkit';
+
+const client = new RhostClient({ host: 'localhost', port: 4201, stripAnsi: false });
+await client.connect();
+
+// 1. Announce Pueblo capability
+await client.send(generatePuebloHandshake());
+
+// 2. Detect the server's acknowledgement
+let puebloActive = false;
+client.onLine((line) => {
+    if (!puebloActive && parsePuebloHandshake(line)) {
+        puebloActive = true;
+    }
+});
+
+await client.login('Wizard', process.env.RHOST_PASS!);
+
+// 3. Convert mixed Pueblo/text output to safe semantic HTML
+const raw = await client.eval('look here');
+const html = convertPueblo(raw);
+// html is sanitized, safe to inject into a browser DOM
+```
+
+### `generatePuebloHandshake()`
+
+Returns the canonical `PUEBLOCLIENT 1.0.1\r\n` string to send to the server.
+
+### `parsePuebloHandshake(line)`
+
+```typescript
+parsePuebloHandshake(input: string): boolean
+```
+
+Returns `true` when `input` begins with the `PUEBLOCLIENT` keyword (case-insensitive). Use this to detect the server's acknowledgement line.
+
+### `convertPueblo(input)`
+
+```typescript
+convertPueblo(input: string): string
+```
+
+Converts a mixed Pueblo/text stream received from a Pueblo-enabled server into sanitized, semantic HTML. Safe to inject directly into a browser DOM.
+
+**Key conversion behaviors:**
+
+| Input | Output |
+|-------|--------|
+| `<a xch_cmd="look here">here</a>` | `<a href="#" data-xch-cmd="look here">here</a>` |
+| `<bgsound src="theme.mid">` | `<audio src="theme.mid" controls loop>` |
+| `<center>...</center>` | `<div style="text-align:center">...</div>` |
+| `<script>...</script>` | _(entire subtree stripped)_ |
+| `<iframe>...</iframe>` | _(entire subtree stripped)_ |
+| Any `on*` attribute (e.g. `onclick`) | _(attribute removed)_ |
+| `javascript:` / `vbscript:` in `href` | _(attribute removed)_ |
+
+Tags not on the allowlist are silently dropped. Text content outside tags is HTML-escaped.
 
 ---
 
@@ -1232,6 +1411,7 @@ See [ROADMAP.md](./ROADMAP.md) for full details and implementation notes.
 | v1.2.0 | Register clobber analyzer · Deploy pipeline with rollback · Dialect compatibility report |
 | v1.3.0 | **Softcode formatter** (`rhost-testkit fmt`) · **Benchmark mode** (`RhostBenchmark`) |
 | v1.4.0 | **PostgreSQL sidecar** (`docker-compose.yml`) · **`execscript` Jobs bridge** (`scripts/jobs_db.py`) · **`rhost.config.json`** custom scripts dir + mush config · `softcode/` directory |
+| v1.6.0 | **`rhost-server` CLI** — standalone server launcher · **WebSocket client support** (`useWebSocket`, `websocketPath`, `websocketSecure`) · **Build flags + stunnel** in `RhostContainer` and `rhost.config.json` · **Pueblo converter** (`convertPueblo`, `generatePuebloHandshake`, `parsePuebloHandshake`) |
 
 ### Planned
 
