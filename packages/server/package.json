@@ -3,7 +3,8 @@
   "version": "1.6.2",
   "description": "Zero-config RhostMUSH Docker server — start, init, and configure in one command",
   "bin": {
-    "rhost-server": "./bin.js"
+    "rhost-server": "./bin.js",
+    "server": "./bin.js"
   },
   "files": [
     "bin.js",
