@@ -246,7 +246,10 @@ export async function runServerCli(args: string[]): Promise<void> {
     runArgs.push(runImage);
 
     // ── Wait for port to be reachable, then print banner ────────────────────
-    const container = spawn('docker', runArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    // Use 'inherit' so Docker pull/build progress writes directly to the
+    // terminal without buffering. Once ready we can't suppress output, but
+    // the MUSH log stays quiet after init anyway.
+    const container = spawn('docker', runArgs, { stdio: 'inherit' });
 
     let ready = false;
     const deadline = Date.now() + startupTimeout;
@@ -263,13 +266,6 @@ export async function runServerCli(args: string[]): Promise<void> {
             sock.once('error',   () => { sock.destroy(); setTimeout(tryConnect, 500); });
         };
         tryConnect();
-    });
-
-    container.stderr.on('data', (d: Buffer) => process.stderr.write(d));
-
-    // Stream stdout until ready, then suppress (MUSH is chatty)
-    container.stdout.on('data', (d: Buffer) => {
-        if (!ready) process.stdout.write(d);
     });
 
     container.on('exit', (code) => {
