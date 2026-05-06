@@ -7,10 +7,14 @@ import * as path from 'path';
 import { spawnSync, spawn } from 'child_process';
 import { loadConfig, RhostConfig, buildArgsFromConfig } from '../config';
 
-const CONTAINER_SCRIPTS_PATH    = '/home/rhost/game/scripts';
-const CONTAINER_MUSH_CONFIG_PATH = '/home/rhost/game/mush.config';
+const CONTAINER_SCRIPTS_PATH      = '/home/rhost/game/scripts';
+const CONTAINER_MUSH_CONFIG_PATH  = '/home/rhost/game/mush.config';
 const CONTAINER_STUNNEL_CERT_PATH = '/home/rhost/stunnel-cert.pem';
 const CONTAINER_STUNNEL_KEY_PATH  = '/home/rhost/stunnel-key.pem';
+
+export function containerName(port: number): string {
+    return `rhost-${port}`;
+}
 
 export interface ServerOptions {
     port: number;
@@ -199,7 +203,8 @@ export async function runServerCli(args: string[]): Promise<void> {
     }
 
     // ── Assemble `docker run` arguments ─────────────────────────────────────
-    const runArgs: string[] = ['run', '--rm', '-p', `${port}:4201`];
+    const name = containerName(port);
+    const runArgs: string[] = ['run', '-d', '--rm', '--name', name, '-p', `${port}:4201`];
 
     if (stunnelEnabled) {
         runArgs.push('-p', `${stunnelAccept}:${stunnelAccept}`);
@@ -245,16 +250,20 @@ export async function runServerCli(args: string[]): Promise<void> {
 
     runArgs.push(runImage);
 
-    // ── Wait for port to be reachable, then print banner ────────────────────
-    // Use 'inherit' so Docker pull/build progress writes directly to the
-    // terminal without buffering. Once ready we can't suppress output, but
-    // the MUSH log stays quiet after init anyway.
-    const container = spawn('docker', runArgs, { stdio: 'inherit' });
+    // ── Launch detached, stream output until port is ready ──────────────────
+    // 'inherit' lets Docker pull/build progress write directly to the terminal.
+    const proc = spawn('docker', runArgs, { stdio: 'inherit' });
 
-    let ready = false;
+    await new Promise<void>((resolve, reject) => {
+        proc.on('exit', (code) => reject(new Error(`rhost-server: docker run exited with code ${code}`)));
+        proc.on('error', reject);
+        // docker run -d exits immediately with the container ID on success
+        proc.on('close', (code) => { if (code === 0) resolve(); });
+    }).catch((err) => { console.error((err as Error).message); process.exit(1); });
+
+    // Poll until the MUSH port accepts connections
     const deadline = Date.now() + startupTimeout;
-
-    const waitForPort = (): Promise<void> => new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
         const { createConnection } = require('net') as typeof import('net');
         const tryConnect = () => {
             if (Date.now() > deadline) {
@@ -266,24 +275,11 @@ export async function runServerCli(args: string[]): Promise<void> {
             sock.once('error',   () => { sock.destroy(); setTimeout(tryConnect, 500); });
         };
         tryConnect();
-    });
-
-    container.on('exit', (code) => {
-        if (!ready) {
-            console.error(`\nrhost-server: container exited with code ${code}`);
-            process.exit(code ?? 1);
-        }
-    });
-
-    try {
-        await waitForPort();
-    } catch (err) {
-        container.kill();
+    }).catch((err) => {
+        spawnSync('docker', ['stop', name], { stdio: 'ignore' });
         console.error((err as Error).message);
         process.exit(1);
-    }
-
-    ready = true;
+    });
 
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('  RhostMUSH is running');
@@ -300,17 +296,53 @@ export async function runServerCli(args: string[]): Promise<void> {
     }
     console.log(`  Image:     ${buildFromSource ? 'built from source' : image}`);
     console.log('  Wizard:    Wizard / Nyctasia  (default credentials)');
+    console.log(`  Name:      ${name}`);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('\nPress Ctrl+C to stop.\n');
+    console.log(`\n  rhost-server logs ${name}`);
+    console.log(`  rhost-server restart ${name}`);
+    console.log(`  rhost-server stop ${name}\n`);
+}
 
-    const shutdown = () => {
-        console.log('\nShutting down…');
-        container.kill('SIGTERM');
-        process.exit(0);
-    };
+// ── Management subcommands ────────────────────────────────────────────────────
 
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
+function resolveTarget(args: string[], defaultPort = 4201): string {
+    // Accept either a container name or a port number
+    const arg = args[0];
+    if (!arg || arg.startsWith('-')) return containerName(defaultPort);
+    if (/^\d+$/.test(arg)) return containerName(parseInt(arg, 10));
+    return arg;
+}
 
-    await new Promise<void>((resolve) => container.on('exit', resolve));
+export function runStopCli(args: string[]): void {
+    const name = resolveTarget(args);
+    console.log(`Stopping ${name}…`);
+    const r = spawnSync('docker', ['stop', name], { stdio: 'inherit' });
+    process.exit(r.status ?? 0);
+}
+
+export function runRestartCli(args: string[]): void {
+    const name = resolveTarget(args);
+    console.log(`Restarting ${name}…`);
+    const r = spawnSync('docker', ['restart', name], { stdio: 'inherit' });
+    process.exit(r.status ?? 0);
+}
+
+export function runLogsCli(args: string[]): void {
+    const name = resolveTarget(args);
+    // Pass remaining args (e.g. --tail 100) after the name/port
+    const extra = args[0] && !args[0].startsWith('-') ? args.slice(1) : args;
+    const proc = spawn('docker', ['logs', '-f', name, ...extra], { stdio: 'inherit' });
+    process.on('SIGINT', () => { proc.kill(); process.exit(0); });
+    proc.on('exit', (code) => process.exit(code ?? 0));
+}
+
+export function runPsCli(_args: string[]): void {
+    // Show only containers whose names start with "rhost-"
+    const r = spawnSync(
+        'docker',
+        ['ps', '--filter', 'name=rhost-', '--format',
+         'table {{.Names}}\t{{.Status}}\t{{.Ports}}'],
+        { stdio: 'inherit' },
+    );
+    process.exit(r.status ?? 0);
 }
