@@ -4,7 +4,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { GenericContainer, Wait } from 'testcontainers';
+import { spawnSync, spawn } from 'child_process';
 import { loadConfig, RhostConfig, buildArgsFromConfig } from '../config';
 
 const CONTAINER_SCRIPTS_PATH    = '/home/rhost/game/scripts';
@@ -165,10 +165,9 @@ export async function runServerCli(args: string[]): Promise<void> {
     if (!opts) return;
 
     const { port, image, buildFromSource, projectRoot, config, startupTimeout } = opts;
-    const stunnelEnabled  = config.stunnel?.enable === true;
-    const stunnelAccept   = config.stunnel?.acceptPort ?? 4203;
+    const stunnelEnabled = config.stunnel?.enable === true;
+    const stunnelAccept  = config.stunnel?.acceptPort ?? 4203;
 
-    const imageLabel = buildFromSource ? `source (${projectRoot})` : image;
     console.log(`\nStarting RhostMUSH — ${buildFromSource ? 'building from source' : `image: ${image}`}`);
     if (config.build && buildFromSource) {
         const flags = Object.entries(buildArgsFromConfig(config.build))
@@ -176,33 +175,64 @@ export async function runServerCli(args: string[]): Promise<void> {
         if (flags) console.log(`Build flags: ${flags}`);
     }
     if (stunnelEnabled) {
-        console.log(`stunnel: TLS on :${stunnelAccept} → :${config.stunnel?.connectPort ?? port}`);
+        console.log(`stunnel: TLS on :${stunnelAccept} → :${config.stunnel?.connectPort ?? 4201}`);
     }
     console.log('Pulling/building image and booting container… (first build may take several minutes)\n');
 
-    // ── Build the GenericContainer ──────────────────────────────────────────
-    let container: GenericContainer;
+    // ── Build image if needed ────────────────────────────────────────────────
+    let runImage = image!;
 
     if (buildFromSource) {
-        let builder = GenericContainer.fromDockerfile(projectRoot);
+        runImage = `rhost-testkit-local:${Date.now()}`;
+        const buildArgs: string[] = ['build', '-t', runImage];
         if (config.build) {
-            builder = builder.withBuildArgs(buildArgsFromConfig(config.build));
+            for (const [k, v] of Object.entries(buildArgsFromConfig(config.build))) {
+                buildArgs.push('--build-arg', `${k}=${v}`);
+            }
         }
-        container = await builder.build();
-    } else {
-        container = new GenericContainer(image!);
+        buildArgs.push(projectRoot);
+        const built = spawnSync('docker', buildArgs, { stdio: 'inherit' });
+        if (built.status !== 0) {
+            console.error('rhost-server: docker build failed');
+            process.exit(1);
+        }
     }
 
-    // ── Copy files into the container ────────────────────────────────────────
+    // ── Assemble `docker run` arguments ─────────────────────────────────────
+    const runArgs: string[] = ['run', '--rm', '-p', `${port}:4201`];
+
+    if (stunnelEnabled) {
+        runArgs.push('-p', `${stunnelAccept}:${stunnelAccept}`);
+        runArgs.push('-e', 'STUNNEL_ENABLE=true');
+        if (config.stunnel?.acceptPort)  runArgs.push('-e', `STUNNEL_ACCEPT_PORT=${config.stunnel.acceptPort}`);
+        if (config.stunnel?.connectPort) runArgs.push('-e', `STUNNEL_CONNECT_PORT=${config.stunnel.connectPort}`);
+
+        const certFile = config.stunnel?.certFile;
+        const keyFile  = config.stunnel?.keyFile;
+        if (certFile) {
+            if (!fs.existsSync(certFile)) {
+                console.error(`rhost-server: stunnel cert not found: ${certFile}`);
+                process.exit(1);
+            }
+            runArgs.push('-v', `${certFile}:${CONTAINER_STUNNEL_CERT_PATH}:ro`);
+            runArgs.push('-e', `STUNNEL_CERT=${CONTAINER_STUNNEL_CERT_PATH}`);
+            if (keyFile && keyFile !== certFile) {
+                if (!fs.existsSync(keyFile)) {
+                    console.error(`rhost-server: stunnel key not found: ${keyFile}`);
+                    process.exit(1);
+                }
+                runArgs.push('-v', `${keyFile}:${CONTAINER_STUNNEL_KEY_PATH}:ro`);
+                runArgs.push('-e', `STUNNEL_KEY=${CONTAINER_STUNNEL_KEY_PATH}`);
+            }
+        }
+    }
+
     if (config.scriptsDir) {
         if (!fs.existsSync(config.scriptsDir)) {
             console.error(`rhost-server: scriptsDir not found: ${config.scriptsDir}`);
             process.exit(1);
         }
-        container = container.withCopyDirectoriesToContainer([{
-            source: config.scriptsDir,
-            target: CONTAINER_SCRIPTS_PATH,
-        }]);
+        runArgs.push('-v', `${path.resolve(config.scriptsDir)}:${CONTAINER_SCRIPTS_PATH}:ro`);
     }
 
     if (config.mushConfig) {
@@ -210,87 +240,81 @@ export async function runServerCli(args: string[]): Promise<void> {
             console.error(`rhost-server: mushConfig not found: ${config.mushConfig}`);
             process.exit(1);
         }
-        container = container.withCopyFilesToContainer([{
-            source: config.mushConfig,
-            target: CONTAINER_MUSH_CONFIG_PATH,
-        }]);
+        runArgs.push('-v', `${path.resolve(config.mushConfig)}:${CONTAINER_MUSH_CONFIG_PATH}:ro`);
     }
 
-    // ── stunnel environment + cert files ─────────────────────────────────────
-    if (stunnelEnabled) {
-        const stunnel = config.stunnel!;
-        const envVars: Record<string, string> = { STUNNEL_ENABLE: 'true' };
-        if (stunnel.acceptPort)  envVars['STUNNEL_ACCEPT_PORT']  = String(stunnel.acceptPort);
-        if (stunnel.connectPort) envVars['STUNNEL_CONNECT_PORT'] = String(stunnel.connectPort);
+    runArgs.push(runImage);
 
-        const certFile = stunnel.certFile;
-        const keyFile  = stunnel.keyFile;
+    // ── Wait for port to be reachable, then print banner ────────────────────
+    const container = spawn('docker', runArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
 
-        if (certFile) {
-            if (!fs.existsSync(certFile)) {
-                console.error(`rhost-server: stunnel cert not found: ${certFile}`);
-                process.exit(1);
+    let ready = false;
+    const deadline = Date.now() + startupTimeout;
+
+    const waitForPort = (): Promise<void> => new Promise((resolve, reject) => {
+        const { createConnection } = require('net') as typeof import('net');
+        const tryConnect = () => {
+            if (Date.now() > deadline) {
+                reject(new Error(`rhost-server: timed out waiting for port ${port} after ${startupTimeout}ms`));
+                return;
             }
-            container = container.withCopyFilesToContainer([{ source: certFile, target: CONTAINER_STUNNEL_CERT_PATH }]);
-            envVars['STUNNEL_CERT'] = CONTAINER_STUNNEL_CERT_PATH;
+            const sock = createConnection({ port, host: '127.0.0.1' });
+            sock.once('connect', () => { sock.destroy(); resolve(); });
+            sock.once('error',   () => { sock.destroy(); setTimeout(tryConnect, 500); });
+        };
+        tryConnect();
+    });
 
-            if (keyFile && keyFile !== certFile) {
-                if (!fs.existsSync(keyFile)) {
-                    console.error(`rhost-server: stunnel key not found: ${keyFile}`);
-                    process.exit(1);
-                }
-                container = container.withCopyFilesToContainer([{ source: keyFile, target: CONTAINER_STUNNEL_KEY_PATH }]);
-                envVars['STUNNEL_KEY'] = CONTAINER_STUNNEL_KEY_PATH;
-            }
+    container.stderr.on('data', (d: Buffer) => process.stderr.write(d));
+
+    // Stream stdout until ready, then suppress (MUSH is chatty)
+    container.stdout.on('data', (d: Buffer) => {
+        if (!ready) process.stdout.write(d);
+    });
+
+    container.on('exit', (code) => {
+        if (!ready) {
+            console.error(`\nrhost-server: container exited with code ${code}`);
+            process.exit(code ?? 1);
         }
-        // If no certFile, entrypoint.sh auto-generates a self-signed cert.
+    });
 
-        container = container.withEnvironment(envVars);
+    try {
+        await waitForPort();
+    } catch (err) {
+        container.kill();
+        console.error((err as Error).message);
+        process.exit(1);
     }
 
-    // ── Ports ─────────────────────────────────────────────────────────────────
-    const exposedPorts: Array<number | { container: number; host: number }> = [
-        { container: 4201, host: port },
-    ];
-    if (stunnelEnabled) {
-        exposedPorts.push({ container: stunnelAccept, host: stunnelAccept });
-    }
-
-    const started = await container
-        .withExposedPorts(...exposedPorts)
-        .withWaitStrategy(Wait.forListeningPorts().withStartupTimeout(startupTimeout))
-        .start();
-
-    const host       = started.getHost();
-    const mappedPort = started.getMappedPort(4201);
+    ready = true;
 
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('  RhostMUSH is running');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`  Host:      ${host}`);
-    console.log(`  Port:      ${mappedPort}`);
+    console.log(`  Host:      localhost`);
+    console.log(`  Port:      ${port}`);
     if (config.build?.enableWebSockets) {
         const wsProto = stunnelEnabled ? 'wss' : 'ws';
-        const wsPort  = stunnelEnabled ? started.getMappedPort(stunnelAccept) : mappedPort;
-        console.log(`  WebSocket: ${wsProto}://${host}:${wsPort}`);
+        const wsPort  = stunnelEnabled ? stunnelAccept : port;
+        console.log(`  WebSocket: ${wsProto}://localhost:${wsPort}`);
     }
     if (stunnelEnabled) {
-        const tlsPort = started.getMappedPort(stunnelAccept);
-        console.log(`  TLS port:  ${tlsPort}  (via stunnel)`);
+        console.log(`  TLS port:  ${stunnelAccept}  (via stunnel)`);
     }
-    console.log(`  Image:     ${buildFromSource ? 'built from source' : imageLabel}`);
+    console.log(`  Image:     ${buildFromSource ? 'built from source' : image}`);
     console.log('  Wizard:    Wizard / Nyctasia  (default credentials)');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('\nPress Ctrl+C to stop.\n');
 
-    const shutdown = async () => {
+    const shutdown = () => {
         console.log('\nShutting down…');
-        await started.stop();
+        container.kill('SIGTERM');
         process.exit(0);
     };
 
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
 
-    await new Promise(() => { /* runs until signal */ });
+    await new Promise<void>((resolve) => container.on('exit', resolve));
 }

@@ -2,12 +2,6 @@
 // Unit tests for parseArgs() in src/cli/server.ts
 // ---------------------------------------------------------------------------
 
-// Mock testcontainers so no Docker calls happen
-jest.mock('testcontainers', () => ({
-    GenericContainer: jest.fn(),
-    Wait: { forListeningPorts: jest.fn(() => ({ withStartupTimeout: jest.fn() })) },
-}));
-
 // Mock fs so no filesystem calls happen (loadConfig returns null by default)
 jest.mock('fs', () => ({
     existsSync: jest.fn().mockReturnValue(false),
