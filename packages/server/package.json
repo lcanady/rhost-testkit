@@ -1,0 +1,36 @@
+{
+  "name": "@rhost/server",
+  "version": "1.6.2",
+  "description": "Zero-config RhostMUSH Docker server — start, init, and configure in one command",
+  "bin": {
+    "rhost-server": "./bin.js"
+  },
+  "files": [
+    "bin.js",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lcanady/rhost-testkit.git",
+    "directory": "packages/server"
+  },
+  "bugs": {
+    "url": "https://github.com/lcanady/rhost-testkit/issues"
+  },
+  "homepage": "https://github.com/lcanady/rhost-testkit/tree/main/packages/server#readme",
+  "keywords": [
+    "mush",
+    "rhostmush",
+    "rhost",
+    "server",
+    "docker",
+    "mud"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@rhost/testkit": "^1.6.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
